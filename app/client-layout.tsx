@@ -1,8 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Inter } from "next/font/google";
-import "./globals.css";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Header } from "@/components/header";
@@ -10,18 +8,14 @@ import { Toaster } from "sonner";
 import { usePathname } from "next/navigation";
 import { AuthProvider } from "@/components/auth-provider";
 
-const inter = Inter({ subsets: ["latin"] });
+// Đừng import font và globals ở đây nữa (đã có ở root layout)
 
 export default function ClientRootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <AuthProvider>
-          <LayoutContent>{children}</LayoutContent>
-        </AuthProvider>
-        <Toaster />
-      </body>
-    </html>
+    <AuthProvider>
+      <LayoutContent>{children}</LayoutContent>
+      <Toaster />
+    </AuthProvider>
   );
 }
 
@@ -31,7 +25,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
 
   // Không bọc sidebar/header cho trang login
   if (isLoginPage) {
-    return children;
+    return <>{children}</>;
   }
 
   // Bọc sidebar + header cho các trang còn lại

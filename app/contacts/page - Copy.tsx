@@ -50,15 +50,6 @@ import {
   Clock,
   X,
   MapPin,
-  Briefcase,    
-  Flag,         
-  Database,     
-  UserCheck,    
-  Tag,
-  MessageCircle, 
-  Users, 
-  Activity,
-  Info           
 } from "lucide-react"
 
 // ---------- Constant Options ----------
@@ -72,12 +63,12 @@ const LIFE_STAGE_OPTIONS = [
 
 // ---------- History Activities ----------
 const activityTypes = [
-  { value: "call", label: "Phone Call / Cuộc gọi", emoji: "📞" },
-  { value: "email", label: "Email / Thư điện tử", emoji: "📧" },
-  { value: "meeting", label: "Meeting / Cuộc họp", emoji: "🤝" },
-  { value: "zalo", label: "Zalo Message / Tin nhắn Zalo", emoji: "💬" },
-  { value: "note", label: "Note / Ghi chú", emoji: "📝" },
-  { value: "task", label: "Task / Nhiệm vụ", emoji: "✅" },
+  { value: "call", label: "📞 Phone Call / Cuộc gọi", emoji: "📞" },
+  { value: "email", label: "📧 Email / Thư điện tử", emoji: "📧" },
+  { value: "meeting", label: "🤝 Meeting / Cuộc họp", emoji: "🤝" },
+  { value: "zalo", label: "💬 Zalo Message / Tin nhắn Zalo", emoji: "💬" },
+  { value: "note", label: "📝 Note / Ghi chú", emoji: "📝" },
+  { value: "task", label: "✅ Task / Nhiệm vụ", emoji: "✅" },
 ]
 
 const getActivityTypeInfo = (type) => {
@@ -104,9 +95,6 @@ function formatTimestamp(ts: string | undefined) {
 export default function ContactsPage() {
   // ----------------- State -----------------
   const { user } = useAuth()
-
-  const [showDateEdit, setShowDateEdit] = useState(false);
-  const [appointmentDate, setAppointmentDate] = React.useState("");
 
   // Activities History
   const [activities, setActivities] = useState<any[]>([])
@@ -145,7 +133,7 @@ export default function ContactsPage() {
     assigned_to: user?.id || "",
     position: "",
     address: "",
-    next_appointment_at: null,
+    next_appointment_at: "",
     tags: [],
     notes: "",
   })
@@ -164,7 +152,7 @@ export default function ContactsPage() {
   assigned_to: "unassigned", // hoặc null tuỳ logic select bạn
   position: "",
   address: "",
-  next_appointment_at: null,
+  next_appointment_at: "",
   tags: [],
   notes: "",
 }
@@ -181,7 +169,6 @@ export default function ContactsPage() {
     dueDate: "",
     file: null as File | null,
   })
-
 
  // Khi mở dialog xem contact (isViewDialogOpen) và có selectedContact:
 useEffect(() => {
@@ -203,6 +190,7 @@ const fetchContactActivities = async (contactId: string) => {
 }
 
 
+
   // Khi user đăng nhập đổi (như đăng nhập lần đầu), set lại default assigned_to
   useEffect(() => {
     setNewContact(prev => ({ ...prev, assigned_to: user?.id || "" }))
@@ -215,17 +203,12 @@ const fetchContactActivities = async (contactId: string) => {
   }, [])
 
   const fetchOptions = async () => {
-
     const { data: appConfig } = await supabase.from("app_config").select("*").eq("active", true)
     setCompanySizeOptions(appConfig?.filter((i: any) => i.type === "company_size") || [])
     setIndustryOptions(appConfig?.filter((i: any) => i.type === "industry") || [])
     setDataSourceOptions(appConfig?.filter((i: any) => i.type === "data_source") || [])
-
-    // Lấy danh sách profile (tất cả người phụ trách)
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, full_name");
-    setProfileOptions(profiles || []);
+    const { data: profiles } = await supabase.from("profiles").select("id, full_name")
+    setProfileOptions(profiles || [])
   }
 
   const fetchContacts = async () => {
@@ -270,32 +253,12 @@ const fetchContactActivities = async (contactId: string) => {
       assigned_to: user?.id || "", // reset về mặc định là user hiện tại
       position: "",
       address: "",
-      // next_appointment_at: newContact.next_appointment_at || null,
-      next_appointment_at:
-    !newContact.next_appointment_at || newContact.next_appointment_at === "" || newContact.next_appointment_at === "null"
-      ? null
-      : newContact.next_appointment_at, // luôn trả về null thực nếu không nhập
+      next_appointment_at: "",
       tags: [],
       notes: "",
     })
     fetchContacts()
   }
-
-const handleSaveAppointmentDate = async () => {
-  if (!selectedContact) return;
-  const { error } = await supabase
-    .from("contacts")
-    .update({ next_appointment_at: appointmentDate })
-    .eq("id", selectedContact.id);
-
-  if (!error) {
-    setSelectedContact({
-      ...selectedContact,
-      next_appointment_at: appointmentDate,
-    });
-    setShowDateEdit(false);
-  }
-};
 
   const handleViewContact = (contact: any) => {
     setSelectedContact(contact)
@@ -325,109 +288,15 @@ const handleSaveAppointmentDate = async () => {
     fetchContacts()
   }
 
-   // Đặt ở đầu component
-  const [deleteDialog, setDeleteDialog] = useState({
-    open: false,
-    contact: null,
-    loading: false,
-    historyCount: 0
-  });
-
-
-  const [confirmDeleteDialog, setConfirmDeleteDialog] = useState({
-  open: false,
-  contactId: null,
-  historyCount: 0
-  });
-
-  const proceedDeleteContact = async (contactId) => {
-  // Xoá tất cả history liên quan trước
-  await supabase.from('contact_history').delete().eq('contact_id', contactId);
-  // Xoá contact
-  const { error } = await supabase.from('contacts').delete().eq('id', contactId);
-  if (error) {
-    toast.error("Lỗi khi xoá liên hệ: " + error.message);
-    return;
+  const handleDeleteContact = async (contactId: any) => {
+    const { error } = await supabase.from("contacts").delete().eq("id", contactId)
+    if (error) {
+      toast.error("Lỗi khi xoá liên hệ: " + error.message)
+      return
+    }
+    toast.success("Đã xoá liên hệ")
+    fetchContacts()
   }
-  toast.success("Đã xoá liên hệ");
-  fetchContacts();
-};
-
-  
-  const openDeleteDialog = async (contact) => {
-  // Đếm số lịch sử liên hệ của contact này
-  const { count } = await supabase
-    .from("contact_history")
-    .select("*", { count: "exact", head: true })
-    .eq("contact_id", contact.id);
-
-  setDeleteDialog({
-    open: true,
-    contact,
-    loading: false,
-    historyCount: count || 0
-  });
-};
-
-
-  const handleDeleteContact = async (contactId) => {
-  // 1. Kiểm tra xem contact này còn lịch sử liên hệ không
-  const { count, error: countError } = await supabase
-    .from('contact_history')
-    .select('id', { count: 'exact', head: true })
-    .eq('contact_id', contactId);
-
-  if (countError) {
-    toast.error('Lỗi kiểm tra lịch sử liên hệ: ' + countError.message);
-    return;
-  }
-
-  if (count > 0) {
-    // 2. Nếu CÓ lịch sử, bật dialog xác nhận xoá hết lịch sử và contact
-    setConfirmDeleteDialog({
-      open: true,
-      contactId,
-      historyCount: count
-    });
-    return;
-  }
-
-  // 3. Nếu KHÔNG có lịch sử: cho xoá contact như thường
-  proceedDeleteContact(contactId);
-};
-
-
-//------------------Cập nhật assigned_to trên Dialog View Detail Contact -------------------------
-// State lưu assigned_to đang chọn
-const [assignedToEdit, setAssignedToEdit] = useState(selectedContact?.assigned_to || "");
-
-// Khi mở dialog chi tiết liên hệ, đồng bộ lại assignedToEdit với contact hiện tại:
-useEffect(() => {
-  setAssignedToEdit(selectedContact?.assigned_to || "");
-}, [selectedContact]);
-
-// Handler lưu thay đổi
-const handleSaveAssignedTo = async (newAssignedTo) => {
-  if (!selectedContact) return;
-  // Update lên database
-  const { error } = await supabase
-    .from("contacts")
-    .update({ assigned_to: newAssignedTo })
-    .eq("id", selectedContact.id);
-
-  if (!error) {
-    // Cập nhật lại UI ngay lập tức
-    setSelectedContact({ ...selectedContact, assigned_to: newAssignedTo });
-    setAssignedToEdit(newAssignedTo);
-    toast.success("Đã cập nhật người phụ trách!");
-  } else {
-    toast.error("Cập nhật thất bại: " + error.message);
-  }
-};
-
-
-
-
 
   const handleSaveNotes = async () => {
     if (!selectedContact) return
@@ -764,128 +633,69 @@ const handleDeleteActivity = async (activityId: string) => {
         {filteredContacts.length === 0 && (
           <div className="text-center text-gray-400">Không tìm thấy liên hệ phù hợp.</div>
         )}
-        
-          <Card className="hover:shadow-lg">
-              <CardHeader>
-                <CardTitle>Danh sách liên hệ của bạn</CardTitle>
-                <CardDescription>
-                  Manage your customer contacts and relationships / Quản lý liên hệ và mối quan hệ khách hàng
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-          <div className="space-y-4">
-            {filteredContacts.map((contact) => (
-              <div
-                key={contact.id}
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
-              >
-                <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <User className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium">{contact.name}</h3>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <Mail className="h-3 w-3" />
-                        {contact.email}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Phone className="h-3 w-3" />
-                        {contact.phone}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Building className="h-3 w-3" />
-                        {contact.company}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
+        {filteredContacts.map((contact) => (
+          <Card key={contact.id} className="hover:shadow-lg">
+            <CardHeader className="flex flex-row justify-between items-center pb-3">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <User className="h-4 w-4 text-blue-600" />
+                  {contact.name}
                   <Badge className={getLifeStageColor(contact.life_stage)}>{LIFE_STAGE_OPTIONS.find(l => l.value === contact.life_stage)?.label || contact.life_stage}</Badge>
-                  {/*<Badge className={getSourceColor(contact.source)}>{contact.source}</Badge>*/}
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleEditContact(contact)}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-
-                     <AlertDialog open={deleteDialog.open} onOpenChange={(open) => setDeleteDialog({ ...deleteDialog, open })}>
-  <AlertDialogTrigger asChild>
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => openDeleteDialog(contact)}
-      title="Xóa liên hệ"
-    >
-      <Trash2 className="h-4 w-4" />
-    </Button>
-  </AlertDialogTrigger>
-  <AlertDialogContent>
-    <AlertDialogHeader>
-      <AlertDialogTitle>
-        <span className="flex items-center gap-2 text-red-600">
-          <Trash2 className="h-5 w-5" />
-          Xóa liên hệ
-        </span>
-      </AlertDialogTitle>
-      <AlertDialogDescription>
-        {deleteDialog.historyCount > 0 ? (
-          <>
-            Liên hệ này còn <b>{deleteDialog.historyCount}</b> lịch sử liên hệ. Để xóa liên hệ, bạn phải xóa tất cả lịch sử liên hệ này trước.<br />
-            <b>Bạn có muốn xóa toàn bộ lịch sử liên hệ và xóa liên hệ này không?</b>
-          </>
-        ) : (
-          <>
-            Are you sure you want to delete this contact? This action cannot be undone.
-            <br />
-            Bạn có chắc chắn muốn xóa liên hệ này? Hành động này không thể hoàn tác.
-          </>
-        )}
-      </AlertDialogDescription>
-    </AlertDialogHeader>
-    <AlertDialogFooter>
-      <AlertDialogCancel onClick={() => setDeleteDialog({ ...deleteDialog, open: false })}>
-        Cancel / Hủy
-      </AlertDialogCancel>
-      <AlertDialogAction
-        disabled={deleteDialog.loading}
-        onClick={async () => {
-          setDeleteDialog((d) => ({ ...d, loading: true }));
-          if (deleteDialog.historyCount > 0) {
-            // Xóa toàn bộ lịch sử liên hệ trước
-            await supabase.from("contact_history").delete().eq("contact_id", deleteDialog.contact.id);
-          }
-          await handleDeleteContact(deleteDialog.contact.id);
-          setDeleteDialog({ open: false, contact: null, loading: false, historyCount: 0 });
-        }}
-      >
-        {deleteDialog.historyCount > 0 ? "Xóa hết lịch sử và liên hệ" : "Delete / Xóa"}
-      </AlertDialogAction>
-    </AlertDialogFooter>
-  </AlertDialogContent>
-</AlertDialog>
- 
-                  </div>
-                </div>
+                </CardTitle>
+                <CardDescription className="flex gap-2 items-center">
+                  <Mail className="h-4 w-4" />{contact.email}
+                  <Phone className="h-4 w-4 ml-4" />{contact.phone}
+                  <Building className="h-4 w-4 ml-4" />{contact.company}
+                </CardDescription>
               </div>
-            ))}
-          </div>
-        </CardContent>
-        </Card>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
+                  <Eye className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => handleEditContact(contact)}>
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="ghost" size="sm">
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Xoá liên hệ?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Hành động này không thể hoàn tác. Bạn có chắc chắn muốn xoá liên hệ này?
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => handleDeleteContact(contact.id)}>
+                        Xoá
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+             
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* --- View Detail Contact Dialog --- */}
+      {/* --- View Dialog --- */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
-          <DialogHeader className="items-center text-center">
+          <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-             Chi tiết liên hệ
+              <User className="h-5 w-5 text-blue-600" />
+              Contact Details / Chi tiết liên hệ
             </DialogTitle>
             <DialogDescription>
-             Xem và quản lý thông tin liên hệ và lịch sử hoạt động
+              View and manage contact information and activity history<br />
+              Xem và quản lý thông tin liên hệ và lịch sử hoạt động
             </DialogDescription>
           </DialogHeader>
           {selectedContact && (
@@ -893,203 +703,91 @@ const handleDeleteActivity = async (activityId: string) => {
               {/* Thông tin cơ bản */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-lg font-semibold text-blue-600">
-                  <Info className="h-5 w-5" />
-                  <span>Thông tin cơ bản</span>
+                  <User className="h-5 w-5" />
+                  <span>Basic Information / Thông tin cơ bản</span>
                 </div>
                 <Separator />
- 
- <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-  {/* ====== NHÓM 1: THÔNG TIN CÁ NHÂN ====== */}
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <User className="h-4 w-4 text-blue-400" />Họ và tên
-    </Label>
-    <p>{selectedContact.name}</p>
-  </div>
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Mail className="h-4 w-4 text-blue-400" /> Email
-    </Label>
-    <p>{selectedContact.email}</p>
-  </div>
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Phone className="h-4 w-4 text-blue-400" />Số điện thoại
-    </Label>
-    <p>{selectedContact.phone}</p>
-  </div>
-
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Briefcase className="h-4 w-4 text-blue-400" />Chức vụ
-    </Label>
-    <p>{selectedContact.position}</p>
-  </div>
-
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <MessageCircle className="h-4 w-4 text-blue-400" /> Zalo
-    </Label>
-    <p>{selectedContact.zalo || <span className="italic text-gray-400">-</span>}</p>
-  </div>
-
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Database className="h-4 w-4 text-blue-400" />Khách đến từ
-    </Label>
-    <Badge variant="outline">{selectedContact.data_source}</Badge>
-  </div>
-
-  
-
-  {/* ====== NHÓM 2: CÔNG TY / NGHỀ NGHIỆP ====== */}
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Building className="h-4 w-4 text-blue-400" />Công ty
-    </Label>
-    <p>{selectedContact.company}</p>
-  </div>
-
-   <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Users className="h-4 w-4 text-blue-400" />Quy mô công ty
-    </Label>
-    <p>{selectedContact.company_size || <span className="italic text-gray-400">-</span>}</p>
-  </div>
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Activity className="h-4 w-4 text-blue-400" />Ngành nghề
-    </Label>
-    <p>{selectedContact.industry || <span className="italic text-gray-400">-</span>}</p>
-  </div>
-
-  {/* ====== NHÓM 3: QUẢN TRỊ CRM ====== */}
- 
-  
-
-  <div className="space-y-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <MapPin className="h-4 w-4 text-blue-400" />Địa chỉ
-    </Label>
-    <p>{selectedContact.address || <span className="italic text-gray-400">-</span>}</p>
-  </div>
- 
-   <div className="space-y-2 lg:col-span-2">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Tag className="h-4 w-4 text-blue-400" />Tags
-    </Label>
-    <div>
-      {(selectedContact.tags || []).map((tag: string, idx: number) => (
-        <Badge key={idx} variant="outline" className="mr-1">{tag}</Badge>
-      ))}
-    </div>
-  </div>
-
-  
-  <div className="space-y-2">
-   <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-    <Calendar className="h-4 w-4 text-blue-400" />Lịch hẹn sắp tới
-    <button
-      className="ml-1 text-blue-600 hover:underline text-xs"
-      title="Cập nhật lịch hẹn"
-      onClick={() => {
-        setAppointmentDate(selectedContact.next_appointment_at || "");
-        setShowDateEdit(true);
-      }}
-    >
-      <Edit className="h-3 w-3" />
-    </button>
-  </Label>
-  <div className="flex items-center gap-2">
-    <span>
-      {selectedContact.next_appointment_at
-        ? formatTimestamp(selectedContact.next_appointment_at)
-        : <span className="italic text-gray-400">-</span>}
-    </span>
-  </div>
-  </div>
-
-  <div className="space-y-2 w-max">
-    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-      <Flag className="h-4 w-4 text-blue-400" />Life Stage
-    </Label>
-
-    <Select
-    value={selectedContact.life_stage}
-    onValueChange={async (value) => {
-      // Gọi API update
-      const { error } = await supabase
-        .from("contacts")
-        .update({ life_stage: value })
-        .eq("id", selectedContact.id)
-      if (!error) {
-        toast.success("Cập nhật Life Stage thành công!")
-        // reload contact tại đây nếu muốn
-        fetchContacts()
-        setSelectedContact({...selectedContact, life_stage: value})
-      } else {
-        toast.error("Lỗi cập nhật Life Stage")
-      }
-    }}
-  >
-    <SelectTrigger className={getLifeStageColor(selectedContact.life_stage)}>
-      <SelectValue>
-        {LIFE_STAGE_OPTIONS.find(l => l.value === selectedContact.life_stage)?.label}
-      </SelectValue>
-    </SelectTrigger>
-    <SelectContent>
-      {LIFE_STAGE_OPTIONS.map((opt) => (
-        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
-  </div>
-
-  <div className="space-y-2 w-max">
-  <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-    <UserCheck className="h-4 w-4 text-blue-400" />
-    Người phụ trách
-  </Label>
-  <Select
-    value={selectedContact.assigned_to || ""}
-    onValueChange={async (value) => {
-      // Update assigned_to cho contact trên DB
-      await supabase
-        .from('contacts')
-        .update({ assigned_to: value === "" ? null : value })
-        .eq('id', selectedContact.id);
-      // Cập nhật lại UI ngay lập tức
-      setSelectedContact({ ...selectedContact, assigned_to: value === "" ? null : value });
-      // (nếu muốn update vào contacts list ngoài, bạn gọi lại fetchContacts hoặc tự update list)
-    }}
-  >
-    <SelectTrigger className="w-[220px]">
-      <SelectValue placeholder="Chọn người phụ trách..." />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
-      {profileOptions.map((profile) => (
-        <SelectItem key={profile.id} value={profile.id}>{profile.full_name}</SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
-</div>
-
-</div>
-</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Full Name / Họ và tên</Label>
+                    <p className="font-medium">{selectedContact.name}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Email / Thư điện tử</Label>
+                    <p className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-gray-400" />
+                      {selectedContact.email}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Phone / Số điện thoại</Label>
+                    <p className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-gray-400" />
+                      {selectedContact.phone}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Company / Công ty</Label>
+                    <p className="flex items-center gap-2">
+                      <Building className="h-4 w-4 text-gray-400" />
+                      {selectedContact.company}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Position / Chức vụ</Label>
+                    <p>{selectedContact.position}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Life Stage / Giai đoạn</Label>
+                    <Badge className={getLifeStageColor(selectedContact.life_stage)}>
+                      {LIFE_STAGE_OPTIONS.find(l => l.value === selectedContact.life_stage)?.label || selectedContact.life_stage}
+                    </Badge>
+                  </div>
+                  <div className="space-y-2 md:col-span-2 lg:col-span-3">
+                    <Label className="text-sm font-medium text-gray-600">Address / Địa chỉ</Label>
+                    <p className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-gray-400" />
+                      {selectedContact.address || <span className="italic text-gray-400">-</span>}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Data Source / Nguồn</Label>
+                    <Badge variant="outline">{selectedContact.data_source}</Badge>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Assigned To / Phụ trách</Label>
+                    <p>{profileOptions.find((p) => p.id === selectedContact.assigned_to)?.full_name || <span className="italic text-gray-400">-</span>}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Last Appointment / Lịch hẹn cuối</Label>
+                    <p className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-gray-400" />
+                      {selectedContact.next_appointment_at ? formatTimestamp(selectedContact.next_appointment_at) : <span className="italic text-gray-400">-</span>}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-gray-600">Tags / Nhãn</Label>
+                    <div>
+                      {(selectedContact.tags || []).map((tag: string, idx: number) => (
+                        <Badge key={idx} variant="outline" className="mr-1">{tag}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               {/* Lịch sử liên hệ */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-lg font-semibold text-green-600">
                     <Clock className="h-5 w-5" />
-                    <span>Lịch sử liên hệ</span>
+                    <span>Contact History / Lịch sử liên hệ</span>
                   </div>
                   <Dialog open={isAddActivityDialogOpen} onOpenChange={setIsAddActivityDialogOpen}>
                     <DialogTrigger asChild>
                       <Button size="sm">
                         <Plus className="mr-2 h-4 w-4" />
-                        Thêm Lịch sử Chăm Khách
+                        Add Activity / Thêm hoạt động
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
@@ -1297,6 +995,10 @@ const handleDeleteActivity = async (activityId: string) => {
     </div>
   )}
 </ScrollArea>
+
+
+
+
               </div>
 
               {/* Notes Section */}
@@ -1304,12 +1006,12 @@ const handleDeleteActivity = async (activityId: string) => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-lg font-semibold text-purple-600">
                     <FileText className="h-5 w-5" />
-                    <span>Ghi chú</span>
+                    <span>Notes / Ghi chú</span>
                   </div>
                   {!editingNotes && (
                     <Button variant="outline" size="sm" onClick={() => setEditingNotes(true)}>
                       <Edit className="mr-2 h-4 w-4" />
-                      Chỉnh sửa Ghi chú
+                      Edit / Chỉnh sửa
                     </Button>
                   )}
                 </div>
@@ -1348,66 +1050,15 @@ const handleDeleteActivity = async (activityId: string) => {
               </div>
             </div>
           )}
-
-<DialogFooter className="flex justify-between w-full">
-  <Button
-    variant="outline"
-    size="sm"
-    className="border-blue-500 text-blue-600 hover:bg-blue-50 hover:border-blue-600 w-32"
-    onClick={() => {
-      setIsViewDialogOpen(false)
-      setIsEditDialogOpen(true)
-      setNewContact(selectedContact)
-    }}
-  >
-    <Edit className="h-4 w-4 mr-1" />
-    Sửa
-  </Button>
-  <Button
-    variant="outline"
-    size="sm"
-    className="border-red-500 text-red-600 hover:bg-red-50 hover:border-red-600 w-32"
-    onClick={() => setIsViewDialogOpen(false)}
-  >
-    <X className="h-4 w-4 mr-1" />Đóng
-  </Button>
-</DialogFooter>
-
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
+              Close / Đóng
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* --- Edit Lịch hẹn sắp tới --- */}
-<Dialog open={showDateEdit} onOpenChange={setShowDateEdit}>
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Cập nhật lịch hẹn sắp tới</DialogTitle>
-    </DialogHeader>
-    <div className="space-y-4">
-      <Label htmlFor="edit-appointment">Chọn ngày & giờ hẹn mới</Label>
-      <Input
-        id="edit-appointment"
-        type="datetime-local"
-        value={appointmentDate}
-        onChange={e => setAppointmentDate(e.target.value)}
-      />
-    </div>
-    <DialogFooter>
-      <Button
-        variant="outline"
-        onClick={() => setShowDateEdit(false)}
-      >Hủy</Button>
-      <Button
-        onClick={handleSaveAppointmentDate}
-        disabled={!appointmentDate}
-      >
-        Lưu
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
-
-
-      {/* --- Edit Dialog Contact (giống Add nhưng là update) --- */}
+      {/* --- Edit Dialog (giống Add nhưng là update) --- */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -1477,7 +1128,7 @@ const handleDeleteActivity = async (activityId: string) => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="address">Địa chỉ</Label>
+              <Label htmlFor="address">Address / Địa chỉ</Label>
               <Input
                 id="address"
                 value={newContact.address}
@@ -1485,8 +1136,7 @@ const handleDeleteActivity = async (activityId: string) => {
                 placeholder="Enter full address..."
               />
             </div>
-
-                        <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="company_size">Company Size / Quy mô công ty</Label>
                 <Select
