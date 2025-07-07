@@ -1,0 +1,639 @@
+"use client"
+
+import { useState } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Search, Plus, Edit, Trash2, Shield, Eye } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { toast } from "sonner"
+
+// Mock users data
+const initialUsers = [
+  {
+    id: 1,
+    name: "Sarah Wilson",
+    email: "sarah@company.com",
+    phone: "+1 234 567 8900",
+    role: "Admin",
+    status: "Active",
+    createdAt: "2024-01-01",
+    avatar: "/placeholder.svg?height=32&width=32",
+    permissions: {
+      contacts: { view: true, edit: true, delete: true },
+      pipeline: { view: true, edit: true, delete: false },
+      analytics: { view: true, edit: false, delete: false },
+      users: { view: true, edit: true, delete: true },
+      export: { view: true, edit: true, delete: false },
+    },
+  },
+  {
+    id: 2,
+    name: "Mike Johnson",
+    email: "mike@company.com",
+    phone: "+1 234 567 8901",
+    role: "Manager",
+    status: "Active",
+    createdAt: "2024-01-05",
+    avatar: "/placeholder.svg?height=32&width=32",
+    permissions: {
+      contacts: { view: true, edit: true, delete: false },
+      pipeline: { view: true, edit: true, delete: false },
+      analytics: { view: true, edit: false, delete: false },
+      users: { view: true, edit: false, delete: false },
+      export: { view: false, edit: false, delete: false },
+    },
+  },
+  {
+    id: 3,
+    name: "Lisa Brown",
+    email: "lisa@company.com",
+    phone: "+1 234 567 8902",
+    role: "Sales",
+    status: "Active",
+    createdAt: "2024-01-10",
+    avatar: "/placeholder.svg?height=32&width=32",
+    permissions: {
+      contacts: { view: true, edit: true, delete: false },
+      pipeline: { view: true, edit: true, delete: false },
+      analytics: { view: true, edit: false, delete: false },
+      users: { view: false, edit: false, delete: false },
+      export: { view: false, edit: false, delete: false },
+    },
+  },
+  {
+    id: 4,
+    name: "David Chen",
+    email: "david@company.com",
+    phone: "+1 234 567 8903",
+    role: "Sales",
+    status: "Inactive",
+    createdAt: "2024-01-15",
+    avatar: "/placeholder.svg?height=32&width=32",
+    permissions: {
+      contacts: { view: true, edit: false, delete: false },
+      pipeline: { view: true, edit: false, delete: false },
+      analytics: { view: false, edit: false, delete: false },
+      users: { view: false, edit: false, delete: false },
+      export: { view: false, edit: false, delete: false },
+    },
+  },
+]
+
+const roles = ["Admin", "Manager", "Sales"]
+const statuses = ["Active", "Inactive"]
+
+const permissionModules = [
+  { id: "contacts", name: "Contacts / Danh bạ" },
+  { id: "pipeline", name: "Pipeline / Quy trình" },
+  { id: "analytics", name: "Analytics / Phân tích" },
+  { id: "users", name: "Users / Người dùng" },
+  { id: "export", name: "Export / Xuất dữ liệu" },
+]
+
+export default function UsersPage() {
+  const [users, setUsers] = useState(initialUsers)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedRole, setSelectedRole] = useState("All")
+  const [selectedStatus, setSelectedStatus] = useState("All")
+  const [selectedUser, setSelectedUser] = useState<any>(null)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
+  const [isPermissionDialogOpen, setIsPermissionDialogOpen] = useState(false)
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    role: "Sales",
+    status: "Active",
+  })
+
+  const filteredUsers = users.filter((user) => {
+    const matchesSearch =
+      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesRole = selectedRole === "All" || user.role === selectedRole
+    const matchesStatus = selectedStatus === "All" || user.status === selectedStatus
+
+    return matchesSearch && matchesRole && matchesStatus
+  })
+
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      email: "",
+      phone: "",
+      role: "Sales",
+      status: "Active",
+    })
+  }
+
+  const getDefaultPermissions = (role: string) => {
+    switch (role) {
+      case "Admin":
+        return {
+          contacts: { view: true, edit: true, delete: true },
+          pipeline: { view: true, edit: true, delete: false },
+          analytics: { view: true, edit: false, delete: false },
+          users: { view: true, edit: true, delete: true },
+          export: { view: true, edit: true, delete: false },
+        }
+      case "Manager":
+        return {
+          contacts: { view: true, edit: true, delete: false },
+          pipeline: { view: true, edit: true, delete: false },
+          analytics: { view: true, edit: false, delete: false },
+          users: { view: true, edit: false, delete: false },
+          export: { view: false, edit: false, delete: false },
+        }
+      default: // Sales
+        return {
+          contacts: { view: true, edit: true, delete: false },
+          pipeline: { view: true, edit: true, delete: false },
+          analytics: { view: true, edit: false, delete: false },
+          users: { view: false, edit: false, delete: false },
+          export: { view: false, edit: false, delete: false },
+        }
+    }
+  }
+
+  const handleAddUser = () => {
+    const newUser = {
+      id: users.length + 1,
+      ...formData,
+      createdAt: new Date().toISOString().split("T")[0],
+      avatar: "/placeholder.svg?height=32&width=32",
+      permissions: getDefaultPermissions(formData.role),
+    }
+    setUsers([...users, newUser])
+    setIsAddDialogOpen(false)
+    resetForm()
+    toast.success("User added successfully! / Đã thêm người dùng thành công!")
+  }
+
+  const handleEditUser = () => {
+    const updatedUsers = users.map((user) => (user.id === selectedUser.id ? { ...user, ...formData } : user))
+    setUsers(updatedUsers)
+    setIsEditDialogOpen(false)
+    setSelectedUser(null)
+    resetForm()
+    toast.success("User updated successfully! / Đã cập nhật người dùng thành công!")
+  }
+
+  const handleDeleteUser = (userId: number) => {
+    setUsers(users.filter((user) => user.id !== userId))
+    toast.success("User deleted successfully! / Đã xóa người dùng thành công!")
+  }
+
+  const openEditDialog = (user: any) => {
+    setSelectedUser(user)
+    setFormData({
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case "Admin":
+        return "bg-red-100 text-red-800"
+      case "Manager":
+        return "bg-blue-100 text-blue-800"
+      case "Sales":
+        return "bg-green-100 text-green-800"
+      default:
+        return "bg-gray-100 text-gray-800"
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    return status === "Active" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"
+  }
+
+  const UserForm = ({ isEdit = false }) => (
+    <div className="grid gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="name">
+            Full Name <span className="text-red-500">*</span>
+            <span className="block text-xs text-muted-foreground">Họ và tên</span>
+          </Label>
+          <Input
+            id="name"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            placeholder="Enter full name..."
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="email">
+            Email Address <span className="text-red-500">*</span>
+            <span className="block text-xs text-muted-foreground">Địa chỉ email</span>
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            placeholder="Enter email address..."
+            required
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="phone">
+            Phone Number
+            <span className="block text-xs text-muted-foreground">Số điện thoại</span>
+          </Label>
+          <Input
+            id="phone"
+            value={formData.phone}
+            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            placeholder="Enter phone number..."
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="role">
+            Role <span className="text-red-500">*</span>
+            <span className="block text-xs text-muted-foreground">Vai trò</span>
+          </Label>
+          <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {roles.map((role) => (
+                <SelectItem key={role} value={role}>
+                  {role}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="status">
+          Status
+          <span className="block text-xs text-muted-foreground">Trạng thái</span>
+        </Label>
+        <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {statuses.map((status) => (
+              <SelectItem key={status} value={status}>
+                {status}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
+          <p className="text-muted-foreground">Quản lý người dùng và phân quyền</p>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Filters / Bộ lọc</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search users... / Tìm kiếm người dùng..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            <Select value={selectedRole} onValueChange={setSelectedRole}>
+              <SelectTrigger className="w-full md:w-48">
+                <SelectValue placeholder="Role / Vai trò" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Roles / Tất cả</SelectItem>
+                {roles.map((role) => (
+                  <SelectItem key={role} value={role}>
+                    {role}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+              <SelectTrigger className="w-full md:w-48">
+                <SelectValue placeholder="Status / Trạng thái" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Status / Tất cả</SelectItem>
+                {statuses.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Users Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Users ({filteredUsers.length})</CardTitle>
+          <CardDescription>Danh sách người dùng ({filteredUsers.length})</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User / Người dùng</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead className="hidden md:table-cell">Phone / SĐT</TableHead>
+                  <TableHead>Role / Vai trò</TableHead>
+                  <TableHead>Status / Trạng thái</TableHead>
+                  <TableHead className="hidden lg:table-cell">Created / Tạo lúc</TableHead>
+                  <TableHead>Actions / Thao tác</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredUsers.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={user.avatar || "/placeholder.svg"} />
+                          <AvatarFallback>
+                            {user.name
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-medium">{user.name}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{user.email}</TableCell>
+                    <TableCell className="hidden md:table-cell">{user.phone}</TableCell>
+                    <TableCell>
+                      <Badge className={getRoleColor(user.role)}>{user.role}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={getStatusColor(user.status)}>{user.status}</Badge>
+                    </TableCell>
+                    <TableCell className="hidden lg:table-cell">{user.createdAt}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setSelectedUser(user)
+                            setIsViewDialogOpen(true)
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setSelectedUser(user)
+                            setIsPermissionDialogOpen(true)
+                          }}
+                        >
+                          <Shield className="h-4 w-4" />
+                        </Button>
+
+                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-red-600"
+                          onClick={() => handleDeleteUser(user.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Floating Add Button */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button size="lg" className="rounded-full shadow-lg h-14 w-14" onClick={resetForm}>
+              <Plus className="h-6 w-6" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Add New User / Thêm người dùng mới</DialogTitle>
+              <DialogDescription>
+                Create a new user account with appropriate permissions
+                <br />
+                Tạo tài khoản người dùng mới với quyền hạn phù hợp
+              </DialogDescription>
+            </DialogHeader>
+            <UserForm />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                Cancel / Hủy
+              </Button>
+              <Button onClick={handleAddUser} disabled={!formData.name || !formData.email}>
+                Add User / Thêm người dùng
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Edit User Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit User / Chỉnh sửa người dùng</DialogTitle>
+            <DialogDescription>
+              Update user information and settings
+              <br />
+              Cập nhật thông tin và cài đặt người dùng
+            </DialogDescription>
+          </DialogHeader>
+          <UserForm isEdit={true} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Cancel / Hủy
+            </Button>
+            <Button onClick={handleEditUser} disabled={!formData.name || !formData.email}>
+              Save Changes / Lưu thay đổi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View User Dialog */}
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>User Details / Chi tiết người dùng</DialogTitle>
+            <DialogDescription>View user information and permissions</DialogDescription>
+          </DialogHeader>
+          {selectedUser && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <Avatar className="h-16 w-16">
+                  <AvatarImage src={selectedUser.avatar || "/placeholder.svg"} />
+                  <AvatarFallback>
+                    {selectedUser.name
+                      .split(" ")
+                      .map((n: string) => n[0])
+                      .join("")}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <h3 className="text-lg font-semibold">{selectedUser.name}</h3>
+                  <p className="text-muted-foreground">{selectedUser.email}</p>
+                  <div className="flex gap-2 mt-2">
+                    <Badge className={getRoleColor(selectedUser.role)}>{selectedUser.role}</Badge>
+                    <Badge className={getStatusColor(selectedUser.status)}>{selectedUser.status}</Badge>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Phone / SĐT</Label>
+                  <p className="text-sm text-muted-foreground">{selectedUser.phone}</p>
+                </div>
+                <div>
+                  <Label>Created Date / Ngày tạo</Label>
+                  <p className="text-sm text-muted-foreground">{selectedUser.createdAt}</p>
+                </div>
+              </div>
+
+              <div>
+                <Label>Permissions / Quyền hạn</Label>
+                <div className="mt-2 space-y-2">
+                  {permissionModules.map((module) => {
+                    const perms = selectedUser.permissions[module.id]
+                    return (
+                      <div key={module.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <span className="text-sm font-medium">{module.name}</span>
+                        <div className="flex gap-2">
+                          {perms.view && <Badge variant="outline">View</Badge>}
+                          {perms.edit && <Badge variant="outline">Edit</Badge>}
+                          {perms.delete && <Badge variant="outline">Delete</Badge>}
+                          {!perms.view && !perms.edit && !perms.delete && <Badge variant="secondary">No Access</Badge>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Permission Management Dialog */}
+      <Dialog open={isPermissionDialogOpen} onOpenChange={setIsPermissionDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Manage Permissions / Quản lý quyền hạn</DialogTitle>
+            <DialogDescription>
+              Configure detailed permissions for {selectedUser?.name}
+              <br />
+              Cấu hình quyền hạn chi tiết cho {selectedUser?.name}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedUser && (
+            <div className="space-y-4">
+              {permissionModules.map((module) => (
+                <div key={module.id} className="border rounded-lg p-4">
+                  <h4 className="font-medium mb-3">{module.name}</h4>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox id={`${module.id}-view`} defaultChecked={selectedUser.permissions[module.id]?.view} />
+                      <Label htmlFor={`${module.id}-view`} className="text-sm">
+                        View / Xem
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox id={`${module.id}-edit`} defaultChecked={selectedUser.permissions[module.id]?.edit} />
+                      <Label htmlFor={`${module.id}-edit`} className="text-sm">
+                        Edit / Sửa
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`${module.id}-delete`}
+                        defaultChecked={selectedUser.permissions[module.id]?.delete}
+                      />
+                      <Label htmlFor={`${module.id}-delete`} className="text-sm">
+                        Delete / Xóa
+                      </Label>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPermissionDialogOpen(false)}>
+              Cancel / Hủy
+            </Button>
+            <Button onClick={() => setIsPermissionDialogOpen(false)}>Save Changes / Lưu thay đổi</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
