@@ -426,9 +426,6 @@ const handleSaveAssignedTo = async (newAssignedTo) => {
 };
 
 
-
-
-
   const handleSaveNotes = async () => {
     if (!selectedContact) return
     const { error } = await supabase
@@ -1051,28 +1048,35 @@ const handleDeleteActivity = async (activityId: string) => {
     Người phụ trách
   </Label>
   <Select
-    value={selectedContact.assigned_to || ""}
-    onValueChange={async (value) => {
-      // Update assigned_to cho contact trên DB
-      await supabase
-        .from('contacts')
-        .update({ assigned_to: value === "" ? null : value })
-        .eq('id', selectedContact.id);
-      // Cập nhật lại UI ngay lập tức
-      setSelectedContact({ ...selectedContact, assigned_to: value === "" ? null : value });
-      // (nếu muốn update vào contacts list ngoài, bạn gọi lại fetchContacts hoặc tự update list)
-    }}
-  >
-    <SelectTrigger className="w-[220px]">
-      <SelectValue placeholder="Chọn người phụ trách..." />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
-      {profileOptions.map((profile) => (
-        <SelectItem key={profile.id} value={profile.id}>{profile.full_name}</SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
+  value={selectedContact.assigned_to || "unassigned"}
+  onValueChange={async (value) => {
+    const newAssigned = value === "unassigned" ? null : value;
+    const { error } = await supabase
+      .from('contacts')
+      .update({ assigned_to: newAssigned })
+      .eq('id', selectedContact.id);
+
+    if (error) {
+      toast.error("Cập nhật người phụ trách thất bại: " + error.message);
+    } else {
+      toast.success("Đã cập nhật người phụ trách thành công");
+      setSelectedContact({ ...selectedContact, assigned_to: newAssigned });
+      // fetchContacts() nếu muốn cập nhật luôn ngoài list
+    }
+  }}
+>
+  <SelectTrigger className="w-[220px]">
+    <SelectValue placeholder="Chọn người phụ trách..." />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
+    {profileOptions.map((profile) => (
+      <SelectItem key={profile.id} value={profile.id}>{profile.full_name}</SelectItem>
+    ))}
+  </SelectContent>
+</Select>
+
+  
 </div>
 
 </div>
