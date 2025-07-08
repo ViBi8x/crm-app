@@ -75,7 +75,7 @@ export function AppSidebar() {
       vietnamese: "Xuất danh bạ",
       url: "/export",
       icon: Download,
-      roles: ["Admin", "Manager"],
+      roles: ["admin", "Manager"],
     },
     {
       title: "Analytics",
@@ -100,14 +100,14 @@ export function AppSidebar() {
       vietnamese: "Quản lý người dùng",
       url: "/users",
       icon: Users,
-      roles: ["Admin", "Manager"],
+      roles: ["admin", "Manager"],
     },
     {
       title: "App Configuration",
       vietnamese: "Cấu hình ứng dụng",
       url: "/config",
       icon: Settings,
-      roles: ["Admin"],
+      roles: ["admin"],
     },
     {
       title: "Account Settings",
@@ -119,9 +119,10 @@ export function AppSidebar() {
 
   // Helper function to check if user has access to a menu item
   const hasAccess = (item: any) => {
-    if (!item.roles) return true
-    return item.roles.includes(user?.role)
-  }
+      if (!item.roles) return true
+      // role so sánh dạng lowercase để tránh bug vặt
+      return item.roles.map((r: string) => r.toLowerCase()).includes((user?.role || "").toLowerCase())
+    }
 
   const filteredMenuItems = menuItems.filter(hasAccess)
 

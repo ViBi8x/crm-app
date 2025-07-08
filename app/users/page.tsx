@@ -1,13 +1,13 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -16,86 +16,15 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Search, Plus, Edit, Trash2, Shield, Eye } from "lucide-react"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { toast } from "sonner"
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Search, Plus, Edit, Trash2, Shield, Eye } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { toast } from "sonner";
+import { supabase } from "@/lib/supabaseClient";
 
-// Mock users data
-const initialUsers = [
-  {
-    id: 1,
-    name: "Sarah Wilson",
-    email: "sarah@company.com",
-    phone: "+1 234 567 8900",
-    role: "Admin",
-    status: "Active",
-    createdAt: "2024-01-01",
-    avatar: "/placeholder.svg?height=32&width=32",
-    permissions: {
-      contacts: { view: true, edit: true, delete: true },
-      pipeline: { view: true, edit: true, delete: false },
-      analytics: { view: true, edit: false, delete: false },
-      users: { view: true, edit: true, delete: true },
-      export: { view: true, edit: true, delete: false },
-    },
-  },
-  {
-    id: 2,
-    name: "Mike Johnson",
-    email: "mike@company.com",
-    phone: "+1 234 567 8901",
-    role: "Manager",
-    status: "Active",
-    createdAt: "2024-01-05",
-    avatar: "/placeholder.svg?height=32&width=32",
-    permissions: {
-      contacts: { view: true, edit: true, delete: false },
-      pipeline: { view: true, edit: true, delete: false },
-      analytics: { view: true, edit: false, delete: false },
-      users: { view: true, edit: false, delete: false },
-      export: { view: false, edit: false, delete: false },
-    },
-  },
-  {
-    id: 3,
-    name: "Lisa Brown",
-    email: "lisa@company.com",
-    phone: "+1 234 567 8902",
-    role: "Sales",
-    status: "Active",
-    createdAt: "2024-01-10",
-    avatar: "/placeholder.svg?height=32&width=32",
-    permissions: {
-      contacts: { view: true, edit: true, delete: false },
-      pipeline: { view: true, edit: true, delete: false },
-      analytics: { view: true, edit: false, delete: false },
-      users: { view: false, edit: false, delete: false },
-      export: { view: false, edit: false, delete: false },
-    },
-  },
-  {
-    id: 4,
-    name: "David Chen",
-    email: "david@company.com",
-    phone: "+1 234 567 8903",
-    role: "Sales",
-    status: "Inactive",
-    createdAt: "2024-01-15",
-    avatar: "/placeholder.svg?height=32&width=32",
-    permissions: {
-      contacts: { view: true, edit: false, delete: false },
-      pipeline: { view: true, edit: false, delete: false },
-      analytics: { view: false, edit: false, delete: false },
-      users: { view: false, edit: false, delete: false },
-      export: { view: false, edit: false, delete: false },
-    },
-  },
-]
-
-const roles = ["Admin", "Manager", "Sales"]
-const statuses = ["Active", "Inactive"]
+const roles = ["admin", "manager", "sales"];
+const statuses = ["active", "inactive"];
 
 const permissionModules = [
   { id: "contacts", name: "Contacts / Danh bạ" },
@@ -103,217 +32,293 @@ const permissionModules = [
   { id: "analytics", name: "Analytics / Phân tích" },
   { id: "users", name: "Users / Người dùng" },
   { id: "export", name: "Export / Xuất dữ liệu" },
-]
+];
 
-export default function UsersPage() {
-  const [users, setUsers] = useState(initialUsers)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedRole, setSelectedRole] = useState("All")
-  const [selectedStatus, setSelectedStatus] = useState("All")
-  const [selectedUser, setSelectedUser] = useState<any>(null)
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
-  const [isPermissionDialogOpen, setIsPermissionDialogOpen] = useState(false)
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    role: "Sales",
-    status: "Active",
-  })
-
-  const filteredUsers = users.filter((user) => {
-    const matchesSearch =
-      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesRole = selectedRole === "All" || user.role === selectedRole
-    const matchesStatus = selectedStatus === "All" || user.status === selectedStatus
-
-    return matchesSearch && matchesRole && matchesStatus
-  })
-
-  const resetForm = () => {
-    setFormData({
-      name: "",
-      email: "",
-      phone: "",
-      role: "Sales",
-      status: "Active",
-    })
+// Default permission for role
+const getDefaultPermissions = (role: string) => {
+  switch (role.toLowerCase()) {
+    case "admin":
+      return {
+        contacts: { view: true, edit: true, delete: true },
+        pipeline: { view: true, edit: true, delete: false },
+        analytics: { view: true, edit: false, delete: false },
+        users: { view: true, edit: true, delete: true },
+        export: { view: true, edit: true, delete: false },
+      };
+    case "manager":
+      return {
+        contacts: { view: true, edit: true, delete: false },
+        pipeline: { view: true, edit: true, delete: false },
+        analytics: { view: true, edit: false, delete: false },
+        users: { view: true, edit: false, delete: false },
+        export: { view: false, edit: false, delete: false },
+      };
+    default:
+      return {
+        contacts: { view: true, edit: true, delete: false },
+        pipeline: { view: true, edit: true, delete: false },
+        analytics: { view: true, edit: false, delete: false },
+        users: { view: false, edit: false, delete: false },
+        export: { view: false, edit: false, delete: false },
+      };
   }
+};
 
-  const getDefaultPermissions = (role: string) => {
-    switch (role) {
-      case "Admin":
-        return {
-          contacts: { view: true, edit: true, delete: true },
-          pipeline: { view: true, edit: true, delete: false },
-          analytics: { view: true, edit: false, delete: false },
-          users: { view: true, edit: true, delete: true },
-          export: { view: true, edit: true, delete: false },
-        }
-      case "Manager":
-        return {
-          contacts: { view: true, edit: true, delete: false },
-          pipeline: { view: true, edit: true, delete: false },
-          analytics: { view: true, edit: false, delete: false },
-          users: { view: true, edit: false, delete: false },
-          export: { view: false, edit: false, delete: false },
-        }
-      default: // Sales
-        return {
-          contacts: { view: true, edit: true, delete: false },
-          pipeline: { view: true, edit: true, delete: false },
-          analytics: { view: true, edit: false, delete: false },
-          users: { view: false, edit: false, delete: false },
-          export: { view: false, edit: false, delete: false },
-        }
-    }
-  }
-
-  const handleAddUser = () => {
-    const newUser = {
-      id: users.length + 1,
-      ...formData,
-      createdAt: new Date().toISOString().split("T")[0],
-      avatar: "/placeholder.svg?height=32&width=32",
-      permissions: getDefaultPermissions(formData.role),
-    }
-    setUsers([...users, newUser])
-    setIsAddDialogOpen(false)
-    resetForm()
-    toast.success("User added successfully! / Đã thêm người dùng thành công!")
-  }
-
-  const handleEditUser = () => {
-    const updatedUsers = users.map((user) => (user.id === selectedUser.id ? { ...user, ...formData } : user))
-    setUsers(updatedUsers)
-    setIsEditDialogOpen(false)
-    setSelectedUser(null)
-    resetForm()
-    toast.success("User updated successfully! / Đã cập nhật người dùng thành công!")
-  }
-
-  const handleDeleteUser = (userId: number) => {
-    setUsers(users.filter((user) => user.id !== userId))
-    toast.success("User deleted successfully! / Đã xóa người dùng thành công!")
-  }
-
-  const openEditDialog = (user: any) => {
-    setSelectedUser(user)
-    setFormData({
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      status: user.status,
-    })
-    setIsEditDialogOpen(true)
-  }
-
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case "Admin":
-        return "bg-red-100 text-red-800"
-      case "Manager":
-        return "bg-blue-100 text-blue-800"
-      case "Sales":
-        return "bg-green-100 text-green-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    return status === "Active" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"
-  }
-
-  const UserForm = ({ isEdit = false }) => (
-    <div className="grid gap-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="name">
-            Full Name <span className="text-red-500">*</span>
-            <span className="block text-xs text-muted-foreground">Họ và tên</span>
-          </Label>
-          <Input
-            id="name"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            placeholder="Enter full name..."
-            required
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="email">
-            Email Address <span className="text-red-500">*</span>
-            <span className="block text-xs text-muted-foreground">Địa chỉ email</span>
-          </Label>
-          <Input
-            id="email"
-            type="email"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            placeholder="Enter email address..."
-            required
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="phone">
-            Phone Number
-            <span className="block text-xs text-muted-foreground">Số điện thoại</span>
-          </Label>
-          <Input
-            id="phone"
-            value={formData.phone}
-            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-            placeholder="Enter phone number..."
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="role">
-            Role <span className="text-red-500">*</span>
-            <span className="block text-xs text-muted-foreground">Vai trò</span>
-          </Label>
-          <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {roles.map((role) => (
-                <SelectItem key={role} value={role}>
-                  {role}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
+const UserForm = ({ formData, setFormData }) => (
+  <div className="grid gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="space-y-2">
-        <Label htmlFor="status">
-          Status
-          <span className="block text-xs text-muted-foreground">Trạng thái</span>
+        <Label htmlFor="name">
+          Full Name <span className="text-red-500">*</span>
+          <span className="block text-xs text-muted-foreground">Họ và tên</span>
         </Label>
-        <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+        <Input
+          id="name"
+          value={formData.name}
+          onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))}
+          placeholder="Enter full name..."
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="email">
+          Email Address <span className="text-red-500">*</span>
+          <span className="block text-xs text-muted-foreground">Địa chỉ email</span>
+        </Label>
+        <Input
+          id="email"
+          type="email"
+          value={formData.email}
+          onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))}
+          placeholder="Enter email address..."
+          required
+        />
+      </div>
+    </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="space-y-2">
+        <Label htmlFor="phone">
+          Phone Number
+          <span className="block text-xs text-muted-foreground">Số điện thoại</span>
+        </Label>
+        <Input
+          id="phone"
+          value={formData.phone}
+          onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))}
+          placeholder="Enter phone number..."
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="role">
+          Role <span className="text-red-500">*</span>
+          <span className="block text-xs text-muted-foreground">Vai trò</span>
+        </Label>
+        <Select value={formData.role} onValueChange={(value) => setFormData((f) => ({ ...f, role: value }))}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {statuses.map((status) => (
-              <SelectItem key={status} value={status}>
-                {status}
+            {roles.map((role) => (
+              <SelectItem key={role} value={role}>
+                {role.charAt(0).toUpperCase() + role.slice(1)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
     </div>
-  )
+    <div className="space-y-2">
+      <Label htmlFor="status">
+        Status
+        <span className="block text-xs text-muted-foreground">Trạng thái</span>
+      </Label>
+      <Select value={formData.status} onValueChange={(value) => setFormData((f) => ({ ...f, status: value }))}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {statuses.map((status) => (
+            <SelectItem key={status} value={status}>
+              {status.charAt(0).toUpperCase() + status.slice(1)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  </div>
+);
+
+export default function UsersPage() {
+  const [users, setUsers] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedRole, setSelectedRole] = useState("All");
+  const [selectedStatus, setSelectedStatus] = useState("All");
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isPermissionDialogOpen, setIsPermissionDialogOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    role: "sales",
+    status: "active",
+  });
+
+  // 1. Load users từ Supabase (bảng profiles)
+  useEffect(() => {
+    const fetchUsers = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("full_name", { ascending: true });
+      if (data) {
+        setUsers(
+          data.map((row) => ({
+            ...row,
+            id: row.id,
+            name: row.full_name,
+            createdAt: row.created_at
+              ? new Date(row.created_at).toLocaleDateString("en-GB")
+              : "",
+            avatar: row.avatar_url || "/placeholder.svg",
+            role: row.role,
+            status: (row.status || "active").charAt(0).toUpperCase() + (row.status || "active").slice(1),
+            permissions: getDefaultPermissions(row.role),
+          }))
+        );
+      }
+    };
+    fetchUsers();
+  }, []);
+
+  // Bộ lọc
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      const matchesSearch =
+        user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.email?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesRole = selectedRole === "All" || user.role?.toLowerCase() === selectedRole.toLowerCase();
+      const matchesStatus = selectedStatus === "All" || user.status?.toLowerCase() === selectedStatus.toLowerCase();
+      return matchesSearch && matchesRole && matchesStatus;
+    });
+  }, [users, searchTerm, selectedRole, selectedStatus]);
+
+  // Thêm user (gọi API route)
+  const handleAddUser = useCallback(async () => {
+    try {
+      const res = await fetch("/api/users/create", {
+        method: "POST",
+        body: JSON.stringify(formData),
+        headers: { "Content-Type": "application/json" },
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json?.error || "Add user failed!");
+        return;
+      }
+      // Reload lại users
+      setUsers((prev) => [
+        ...prev,
+        {
+          ...formData,
+          id: json.uid,
+          name: formData.name,
+          createdAt: new Date().toLocaleDateString("en-GB"),
+          avatar: "/placeholder.svg",
+          permissions: getDefaultPermissions(formData.role),
+        },
+      ]);
+      setIsAddDialogOpen(false);
+      setFormData({
+        name: "",
+        email: "",
+        phone: "",
+        role: "sales",
+        status: "active",
+      });
+      toast.success("Đã thêm người dùng thành công!");
+    } catch (e) {
+      toast.error("Add user failed!");
+    }
+  }, [formData]);
+
+  // Sửa user (bảng profiles)
+  const handleEditUser = useCallback(async () => {
+    if (!selectedUser) return;
+    const { id } = selectedUser;
+    const update = {
+      full_name: formData.name,
+      phone: formData.phone,
+      role: formData.role,
+      status: formData.status,
+    };
+    const { error } = await supabase.from("profiles").update(update).eq("id", id);
+    if (error) {
+      toast.error("Update user failed!");
+      return;
+    }
+    setUsers((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, ...formData, name: formData.name, permissions: getDefaultPermissions(formData.role) } : u))
+    );
+    setIsEditDialogOpen(false);
+    setSelectedUser(null);
+    toast.success("Đã cập nhật người dùng thành công!");
+  }, [selectedUser, formData]);
+
+  // Xoá user (bảng profiles)
+  const handleDeleteUser = useCallback(async (userId) => {
+    const { error } = await supabase.from("profiles").delete().eq("id", userId);
+    if (error) {
+      toast.error("Delete user failed!");
+      return;
+    }
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    toast.success("Đã xóa người dùng thành công!");
+  }, []);
+
+  const openEditDialog = useCallback((user) => {
+    setSelectedUser(user);
+    setFormData({
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+    });
+    setIsEditDialogOpen(true);
+  }, []);
+
+  const openAddDialog = useCallback(() => {
+    setFormData({
+      name: "",
+      email: "",
+      phone: "",
+      role: "sales",
+      status: "active",
+    });
+    setIsAddDialogOpen(true);
+  }, []);
+
+  // Màu badge
+  const getRoleColor = (role: string) => {
+    switch (role?.toLowerCase()) {
+      case "admin":
+        return "bg-red-100 text-red-800";
+      case "manager":
+        return "bg-blue-100 text-blue-800";
+      case "sales":
+        return "bg-green-100 text-green-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+  const getStatusColor = (status: string) => {
+    return status?.toLowerCase() === "active"
+      ? "bg-green-100 text-green-800"
+      : "bg-gray-100 text-gray-800";
+  };
 
   return (
     <div className="space-y-6">
@@ -323,7 +328,6 @@ export default function UsersPage() {
           <p className="text-muted-foreground">Quản lý người dùng và phân quyền</p>
         </div>
       </div>
-
       {/* Filters */}
       <Card>
         <CardHeader>
@@ -350,7 +354,7 @@ export default function UsersPage() {
                 <SelectItem value="All">All Roles / Tất cả</SelectItem>
                 {roles.map((role) => (
                   <SelectItem key={role} value={role}>
-                    {role}
+                    {role.charAt(0).toUpperCase() + role.slice(1)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -363,7 +367,7 @@ export default function UsersPage() {
                 <SelectItem value="All">All Status / Tất cả</SelectItem>
                 {statuses.map((status) => (
                   <SelectItem key={status} value={status}>
-                    {status}
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -402,7 +406,7 @@ export default function UsersPage() {
                           <AvatarFallback>
                             {user.name
                               .split(" ")
-                              .map((n) => n[0])
+                              .map((n: string) => n[0])
                               .join("")}
                           </AvatarFallback>
                         </Avatar>
@@ -426,28 +430,25 @@ export default function UsersPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => {
-                            setSelectedUser(user)
-                            setIsViewDialogOpen(true)
+                            setSelectedUser(user);
+                            setIsViewDialogOpen(true);
                           }}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => {
-                            setSelectedUser(user)
-                            setIsPermissionDialogOpen(true)
+                            setSelectedUser(user);
+                            setIsPermissionDialogOpen(true);
                           }}
                         >
                           <Shield className="h-4 w-4" />
                         </Button>
-
                         <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
                           <Edit className="h-4 w-4" />
                         </Button>
-
                         <Button
                           variant="ghost"
                           size="icon"
@@ -470,7 +471,7 @@ export default function UsersPage() {
       <div className="fixed bottom-6 right-6 z-50">
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button size="lg" className="rounded-full shadow-lg h-14 w-14" onClick={resetForm}>
+            <Button size="lg" className="rounded-full shadow-lg h-14 w-14" onClick={openAddDialog}>
               <Plus className="h-6 w-6" />
             </Button>
           </DialogTrigger>
@@ -483,7 +484,7 @@ export default function UsersPage() {
                 Tạo tài khoản người dùng mới với quyền hạn phù hợp
               </DialogDescription>
             </DialogHeader>
-            <UserForm />
+            <UserForm formData={formData} setFormData={setFormData} />
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                 Cancel / Hủy
@@ -507,7 +508,7 @@ export default function UsersPage() {
               Cập nhật thông tin và cài đặt người dùng
             </DialogDescription>
           </DialogHeader>
-          <UserForm isEdit={true} />
+          <UserForm formData={formData} setFormData={setFormData} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               Cancel / Hủy
@@ -563,18 +564,18 @@ export default function UsersPage() {
                 <Label>Permissions / Quyền hạn</Label>
                 <div className="mt-2 space-y-2">
                   {permissionModules.map((module) => {
-                    const perms = selectedUser.permissions[module.id]
+                    const perms = selectedUser.permissions[module.id];
                     return (
                       <div key={module.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                         <span className="text-sm font-medium">{module.name}</span>
                         <div className="flex gap-2">
-                          {perms.view && <Badge variant="outline">View</Badge>}
-                          {perms.edit && <Badge variant="outline">Edit</Badge>}
-                          {perms.delete && <Badge variant="outline">Delete</Badge>}
-                          {!perms.view && !perms.edit && !perms.delete && <Badge variant="secondary">No Access</Badge>}
+                          {perms?.view && <Badge variant="outline">View</Badge>}
+                          {perms?.edit && <Badge variant="outline">Edit</Badge>}
+                          {perms?.delete && <Badge variant="outline">Delete</Badge>}
+                          {!perms?.view && !perms?.edit && !perms?.delete && <Badge variant="secondary">No Access</Badge>}
                         </div>
                       </div>
-                    )
+                    );
                   })}
                 </div>
               </div>
@@ -635,5 +636,5 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

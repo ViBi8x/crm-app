@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 interface AuthContextType {
-  user: any; // Bạn có thể định nghĩa lại type cho user nếu cần
+  user: any; // Đã có role, avatar_url, v.v...
   isAuthenticated: boolean;
   isLoading: boolean;
   logout: () => Promise<void>;
@@ -20,25 +20,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Lấy trạng thái user hiện tại
+  // Lấy user & profile
   useEffect(() => {
     let ignore = false;
     const getUser = async () => {
       setIsLoading(true);
       const { data, error } = await supabase.auth.getUser();
+      let profile = null;
+      if (data?.user) {
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", data.user.id)
+          .single();
+        profile = profileData;
+      }
       if (!ignore) {
-        setUser(data?.user || null);
+        setUser(data?.user ? { ...data.user, ...profile } : null);
         setIsAuthenticated(!!data?.user);
         setIsLoading(false);
       }
     };
     getUser();
 
-    // Lắng nghe sự kiện login/logout của supabase
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      setIsAuthenticated(!!session?.user);
-    });
+    // Lắng nghe login/logout, tự update lại user+profile
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (session?.user) {
+          const { data: profileData } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", session.user.id)
+            .single();
+          setUser({ ...session.user, ...profileData });
+        } else {
+          setUser(null);
+        }
+        setIsAuthenticated(!!session?.user);
+      }
+    );
 
     return () => {
       ignore = true;
@@ -46,11 +66,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Tự động redirect khi chưa đăng nhập hoặc đã đăng nhập
+  // Redirect nếu chưa đăng nhập
   useEffect(() => {
     if (isLoading) return;
-
-    // Cho phép truy cập trang test-supabase mà không cần đăng nhập
     if (!isAuthenticated && pathname !== "/login" && pathname !== "/test-supabase") {
       router.push("/login");
     } else if (isAuthenticated && pathname === "/login") {
@@ -58,7 +76,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, pathname, router, isLoading]);
 
-  // Đăng xuất thật
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -66,7 +83,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/login");
   };
 
-  // Fix hydration warning: chỉ render UI sau khi đã xác định trạng thái
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
