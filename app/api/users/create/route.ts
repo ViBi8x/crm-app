@@ -10,23 +10,29 @@ const supabaseAdmin = createClient(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, email, phone, role, status } = body;
+    const { name, email, phone, role, status, password } = body;
 
-    // 1. Tạo Auth user (mật khẩu random 8 ký tự, có thể truyền thêm nếu muốn)
-    const password = Math.random().toString(36).slice(-8);
+    // Sử dụng password người dùng nhập, nếu không thì random 8 ký tự
+    const finalPassword = password && password.length >= 6 ? password : Math.random().toString(36).slice(-8);
+
+    // 1. Tạo tài khoản Auth
+    console.log("Creating user:", { email, finalPassword, name, role, status });
+
     const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
       email,
-      password,
+      password: finalPassword,
       email_confirm: true,
     });
-    if (userError || !userData.user) {
+
+    if (userError || !userData?.user) {
+      console.error("Supabase Auth Error:", userError);
       return NextResponse.json(
         { error: "Failed to create Auth user!", detail: userError?.message },
         { status: 400 }
       );
     }
 
-    // 2. Lưu vào bảng profiles
+    // 2. Lưu vào bảng profiles (liên kết với user id vừa tạo)
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .insert([
@@ -35,17 +41,19 @@ export async function POST(req: NextRequest) {
           full_name: name,
           phone,
           role,
-          status: status.toLowerCase(),
+          status: status?.toLowerCase(),
           email, // Nếu bảng bạn có trường email
         },
       ]);
 
     if (profileError) {
+      console.error("Supabase profile error:", profileError);
       return NextResponse.json({ error: "Failed to save profile!" }, { status: 400 });
     }
 
     return NextResponse.json({ success: true, uid: userData.user.id });
   } catch (e) {
+    console.error("Server error:", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

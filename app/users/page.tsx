@@ -64,7 +64,7 @@ const getDefaultPermissions = (role: string) => {
   }
 };
 
-const UserForm = ({ formData, setFormData }) => (
+const UserForm = ({ formData, setFormData, isEdit = false  }) => (
   <div className="grid gap-6">
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="space-y-2">
@@ -127,6 +127,22 @@ const UserForm = ({ formData, setFormData }) => (
         </Select>
       </div>
     </div>
+    {!isEdit && (
+      <div className="space-y-2">
+        <Label htmlFor="password">
+          Password <span className="text-red-500">*</span>
+          <span className="block text-xs text-muted-foreground">Mật khẩu đăng nhập</span>
+        </Label>
+        <Input
+          id="password"
+          type="password"
+          value={formData.password}
+          onChange={(e) => setFormData((f) => ({ ...f, password: e.target.value }))}
+          placeholder="Nhập mật khẩu hoặc để trống để tự sinh"
+        />
+      </div>
+    )}
+
     <div className="space-y-2">
       <Label htmlFor="status">
         Status
@@ -164,6 +180,7 @@ export default function UsersPage() {
     phone: "",
     role: "sales",
     status: "active",
+    password: "",
   });
 
   // 1. Load users từ Supabase (bảng profiles)
@@ -237,6 +254,7 @@ export default function UsersPage() {
         phone: "",
         role: "sales",
         status: "active",
+        password: "",
       });
       toast.success("Đã thêm người dùng thành công!");
     } catch (e) {
@@ -286,6 +304,7 @@ export default function UsersPage() {
       phone: user.phone,
       role: user.role,
       status: user.status,
+      password: "",
     });
     setIsEditDialogOpen(true);
   }, []);
@@ -297,6 +316,7 @@ export default function UsersPage() {
       phone: "",
       role: "sales",
       status: "active",
+      password: "",
     });
     setIsAddDialogOpen(true);
   }, []);
