@@ -64,7 +64,7 @@ const getDefaultPermissions = (role: string) => {
   }
 };
 
-const UserForm = ({ formData, setFormData, isEdit = false  }) => (
+const UserForm = ({ formData, setFormData, isEdit = false }) => (
   <div className="grid gap-6">
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="space-y-2">
@@ -165,6 +165,7 @@ const UserForm = ({ formData, setFormData, isEdit = false  }) => (
 );
 
 export default function UsersPage() {
+  // ----- State -----
   const [users, setUsers] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRole, setSelectedRole] = useState("All");
@@ -174,6 +175,9 @@ export default function UsersPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isPermissionDialogOpen, setIsPermissionDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<any>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -186,7 +190,7 @@ export default function UsersPage() {
   // 1. Load users từ Supabase (bảng profiles)
   useEffect(() => {
     const fetchUsers = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("profiles")
         .select("*")
         .order("full_name", { ascending: true });
@@ -224,6 +228,18 @@ export default function UsersPage() {
 
   // Thêm user (gọi API route)
   const handleAddUser = useCallback(async () => {
+    // 1. Kiểm tra trùng email/phone
+    const { data: existed } = await supabase
+      .from("profiles")
+      .select("id")
+      .or(`email.eq.${formData.email},phone.eq.${formData.phone}`);
+
+    if (existed && existed.length > 0) {
+      toast.error("Email hoặc số điện thoại đã tồn tại, vui lòng nhập lại!");
+      return;
+    }
+
+    // 2. Gửi request tạo user như cũ
     try {
       const res = await fetch("/api/users/create", {
         method: "POST",
@@ -235,7 +251,6 @@ export default function UsersPage() {
         toast.error(json?.error || "Add user failed!");
         return;
       }
-      // Reload lại users
       setUsers((prev) => [
         ...prev,
         {
@@ -265,36 +280,68 @@ export default function UsersPage() {
   // Sửa user (bảng profiles)
   const handleEditUser = useCallback(async () => {
     if (!selectedUser) return;
-    const { id } = selectedUser;
+    const userId = selectedUser.id;
+
+    // 1. Kiểm tra trùng email/phone (ngoại trừ chính user này)
+    const { data: existed } = await supabase
+      .from("profiles")
+      .select("id")
+      .or(`email.eq.${formData.email},phone.eq.${formData.phone}`)
+      .neq("id", userId);
+
+    if (existed && existed.length > 0) {
+      toast.error("Email hoặc số điện thoại đã tồn tại, vui lòng nhập lại!");
+      return;
+    }
+
+    // 2. Update
     const update = {
       full_name: formData.name,
       phone: formData.phone,
       role: formData.role,
       status: formData.status,
     };
-    const { error } = await supabase.from("profiles").update(update).eq("id", id);
+    const { error } = await supabase.from("profiles").update(update).eq("id", userId);
     if (error) {
       toast.error("Update user failed!");
       return;
     }
     setUsers((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, ...formData, name: formData.name, permissions: getDefaultPermissions(formData.role) } : u))
+      prev.map((u) =>
+        u.id === userId
+          ? { ...u, ...formData, name: formData.name, permissions: getDefaultPermissions(formData.role) }
+          : u
+      )
     );
     setIsEditDialogOpen(false);
     setSelectedUser(null);
     toast.success("Đã cập nhật người dùng thành công!");
   }, [selectedUser, formData]);
 
+
   // Xoá user (bảng profiles)
-  const handleDeleteUser = useCallback(async (userId) => {
-    const { error } = await supabase.from("profiles").delete().eq("id", userId);
-    if (error) {
-      toast.error("Delete user failed!");
-      return;
-    }
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
-    toast.success("Đã xóa người dùng thành công!");
-  }, []);
+  const handleDeleteUser = useCallback(async () => {
+  if (!userToDelete) return;
+  const userId = userToDelete.id;
+
+  // Gọi API xoá (xử lý cả Auth + profiles)
+  const res = await fetch("/api/users/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: userId }),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    toast.error(json?.error || "Delete user failed!");
+    return;
+  }
+  setUsers((prev) => prev.filter((u) => u.id !== userId));
+  setIsDeleteDialogOpen(false);
+  setUserToDelete(null);
+  toast.success("Đã xóa người dùng thành công!");
+}, [userToDelete]);
+
+
 
   const openEditDialog = useCallback((user) => {
     setSelectedUser(user);
@@ -473,7 +520,10 @@ export default function UsersPage() {
                           variant="ghost"
                           size="icon"
                           className="text-red-600"
-                          onClick={() => handleDeleteUser(user.id)}
+                          onClick={() => {
+                            setUserToDelete(user);
+                            setIsDeleteDialogOpen(true);
+                          }}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -504,7 +554,7 @@ export default function UsersPage() {
                 Tạo tài khoản người dùng mới với quyền hạn phù hợp
               </DialogDescription>
             </DialogHeader>
-            <UserForm formData={formData} setFormData={setFormData} />
+            <UserForm formData={formData} setFormData={setFormData} isEdit={false} />
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                 Cancel / Hủy
@@ -528,7 +578,7 @@ export default function UsersPage() {
               Cập nhật thông tin và cài đặt người dùng
             </DialogDescription>
           </DialogHeader>
-          <UserForm formData={formData} setFormData={setFormData} />
+          <UserForm formData={formData} setFormData={setFormData} isEdit={true} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               Cancel / Hủy
@@ -652,6 +702,29 @@ export default function UsersPage() {
               Cancel / Hủy
             </Button>
             <Button onClick={() => setIsPermissionDialogOpen(false)}>Save Changes / Lưu thay đổi</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete User Confirm Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Xác nhận xoá người dùng</DialogTitle>
+            <DialogDescription>
+              Bạn có chắc chắn muốn xoá người dùng{" "}
+              <b>{userToDelete?.name}</b> ({userToDelete?.email}) không?
+              <br />
+              Thao tác này không thể hoàn tác.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Huỷ
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteUser}>
+              Xoá
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

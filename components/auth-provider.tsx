@@ -1,11 +1,10 @@
 "use client";
-
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 interface AuthContextType {
-  user: any; // Đã có role, avatar_url, v.v...
+  user: any;
   isAuthenticated: boolean;
   isLoading: boolean;
   logout: () => Promise<void>;
@@ -20,56 +19,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Lấy user & profile
   useEffect(() => {
     let ignore = false;
-    const getUser = async () => {
+
+    const getUserSession = async () => {
       setIsLoading(true);
-      const { data, error } = await supabase.auth.getUser();
-      let profile = null;
-      if (data?.user) {
+      // getSession sẽ lấy lại được session sau reload
+      const { data: { session }, error } = await supabase.auth.getSession();
+
+      if (session?.user) {
+        // Lấy profile
         const { data: profileData } = await supabase
           .from("profiles")
           .select("*")
-          .eq("id", data.user.id)
+          .eq("id", session.user.id)
           .single();
-        profile = profileData;
-      }
-      if (!ignore) {
-        setUser(data?.user ? { ...data.user, ...profile } : null);
-        setIsAuthenticated(!!data?.user);
-        setIsLoading(false);
+        if (!ignore) {
+          setUser({ ...session.user, ...profileData });
+          setIsAuthenticated(true);
+          setIsLoading(false);
+        }
+      } else {
+        if (!ignore) {
+          setUser(null);
+          setIsAuthenticated(false);
+          setIsLoading(false);
+        }
       }
     };
-    getUser();
 
-    // Lắng nghe login/logout, tự update lại user+profile
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (session?.user) {
-          const { data: profileData } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", session.user.id)
-            .single();
-          setUser({ ...session.user, ...profileData });
-        } else {
-          setUser(null);
-        }
-        setIsAuthenticated(!!session?.user);
+    getUserSession();
+
+    // Listen login/logout
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", session.user.id)
+          .single()
+          .then(({ data: profileData }) => {
+            setUser({ ...session.user, ...profileData });
+            setIsAuthenticated(true);
+            setIsLoading(false);
+          });
+      } else {
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsLoading(false);
       }
-    );
+    });
 
     return () => {
       ignore = true;
-      listener?.subscription.unsubscribe();
+      authListener?.subscription.unsubscribe();
     };
   }, []);
 
-  // Redirect nếu chưa đăng nhập
   useEffect(() => {
     if (isLoading) return;
-    if (!isAuthenticated && pathname !== "/login" && pathname !== "/test-supabase") {
+    if (!isAuthenticated && pathname !== "/login") {
       router.push("/login");
     } else if (isAuthenticated && pathname === "/login") {
       router.push("/");
