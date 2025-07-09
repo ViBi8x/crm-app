@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,112 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Search, CalendarIcon, User, UserPlus, Edit, Mail, FileText, Settings, Download } from "lucide-react"
-import { format } from "date-fns"
+import { format, parseISO } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-
-// Mock activity data
-const activities = [
-  {
-    id: 1,
-    type: "contact_added",
-    action: "Contact Added",
-    vietnamese: "Đã thêm liên hệ",
-    description: "John Smith was added to contacts",
-    vietnameseDescription: "John Smith đã được thêm vào danh bạ",
-    user: "Sarah Wilson",
-    userAvatar: "/placeholder.svg?height=32&width=32",
-    timestamp: "2024-01-15 10:30",
-    details: {
-      contactName: "John Smith",
-      contactEmail: "john@company.com",
-      source: "Website Form",
-    },
-  },
-  {
-    id: 2,
-    type: "pipeline_moved",
-    action: "Pipeline Updated",
-    vietnamese: "Cập nhật quy trình",
-    description: "Maria Garcia moved from Lead to Opportunity",
-    vietnameseDescription: "Maria Garcia chuyển từ Lead sang Opportunity",
-    user: "Mike Johnson",
-    userAvatar: "/placeholder.svg?height=32&width=32",
-    timestamp: "2024-01-15 09:45",
-    details: {
-      contactName: "Maria Garcia",
-      fromStage: "Lead",
-      toStage: "Opportunity",
-      value: "$12,000",
-    },
-  },
-  {
-    id: 3,
-    type: "appointment_scheduled",
-    action: "Appointment Scheduled",
-    vietnamese: "Đã lên lịch cuộc hẹn",
-    description: "Demo meeting scheduled with David Wilson",
-    vietnameseDescription: "Cuộc họp demo đã được lên lịch với David Wilson",
-    user: "Lisa Brown",
-    userAvatar: "/placeholder.svg?height=32&width=32",
-    timestamp: "2024-01-15 08:20",
-    details: {
-      contactName: "David Wilson",
-      appointmentDate: "2024-01-18 14:00",
-      type: "Demo",
-      duration: "60 minutes",
-    },
-  },
-  {
-    id: 4,
-    type: "contact_edited",
-    action: "Contact Updated",
-    vietnamese: "Cập nhật liên hệ",
-    description: "Updated contact information for Alice Johnson",
-    vietnameseDescription: "Cập nhật thông tin liên hệ cho Alice Johnson",
-    user: "Sarah Wilson",
-    userAvatar: "/placeholder.svg?height=32&width=32",
-    timestamp: "2024-01-14 16:15",
-    details: {
-      contactName: "Alice Johnson",
-      fieldsUpdated: ["phone", "company"],
-      previousCompany: "Old Corp",
-      newCompany: "New Corp",
-    },
-  },
-  {
-    id: 5,
-    type: "email_sent",
-    action: "Email Sent",
-    vietnamese: "Đã gửi email",
-    description: "Follow-up email sent to Bob Smith",
-    vietnameseDescription: "Email theo dõi đã được gửi cho Bob Smith",
-    user: "Mike Johnson",
-    userAvatar: "/placeholder.svg?height=32&width=32",
-    timestamp: "2024-01-14 14:30",
-    details: {
-      contactName: "Bob Smith",
-      subject: "Follow-up on our conversation",
-      template: "Follow-up Template",
-    },
-  },
-  {
-    id: 6,
-    type: "user_login",
-    action: "User Login",
-    vietnamese: "Đăng nhập",
-    description: "Lisa Brown logged into the system",
-    vietnameseDescription: "Lisa Brown đã đăng nhập vào hệ thống",
-    user: "Lisa Brown",
-    userAvatar: "/placeholder.svg?height=32&width=32",
-    timestamp: "2024-01-14 09:00",
-    details: {
-      ipAddress: "192.168.1.100",
-      device: "Chrome on Windows",
-      location: "Ho Chi Minh City",
-    },
-  },
-]
+import { supabase } from "@/lib/supabaseClient"
 
 const activityTypes = [
   { value: "all", label: "All Activities / Tất cả hoạt động" },
@@ -126,76 +24,128 @@ const activityTypes = [
   { value: "user_login", label: "User Login / Đăng nhập" },
 ]
 
-const users = ["All Users", "Sarah Wilson", "Mike Johnson", "Lisa Brown", "David Chen"]
+function getActivityIcon(type: string) {
+  switch (type) {
+    case "contact_added": return UserPlus
+    case "contact_edited": return Edit
+    case "pipeline_moved": return FileText
+    case "appointment_scheduled": return CalendarIcon
+    case "email_sent": return Mail
+    case "user_login": return User
+    default: return Settings
+  }
+}
+
+function getActivityColor(type: string) {
+  switch (type) {
+    case "contact_added": return "bg-green-100 text-green-800"
+    case "contact_edited": return "bg-blue-100 text-blue-800"
+    case "pipeline_moved": return "bg-purple-100 text-purple-800"
+    case "appointment_scheduled": return "bg-yellow-100 text-yellow-800"
+    case "email_sent": return "bg-indigo-100 text-indigo-800"
+    case "user_login": return "bg-gray-100 text-gray-800"
+    default: return "bg-gray-100 text-gray-800"
+  }
+}
+
+function getActivityLabel(type: string) {
+  return activityTypes.find((t) => t.value === type)?.label?.split(" / ")[0] || "Activity"
+}
+function getActivityLabelVn(type: string) {
+  return activityTypes.find((t) => t.value === type)?.label?.split(" / ")[1] || "Hoạt động"
+}
 
 export default function ActivityPage() {
+  const [rawActivities, setRawActivities] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedType, setSelectedType] = useState("all")
   const [selectedUser, setSelectedUser] = useState("All Users")
   const [dateRange, setDateRange] = useState<DateRange | undefined>()
 
-  const filteredActivities = activities.filter((activity) => {
-    const matchesSearch =
-      activity.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      activity.user.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesType = selectedType === "all" || activity.type === selectedType
-    const matchesUser = selectedUser === "All Users" || activity.user === selectedUser
-
-    // Date range filtering would be implemented here
-    return matchesSearch && matchesType && matchesUser
-  })
-
-  const getActivityIcon = (type: string) => {
-    switch (type) {
-      case "contact_added":
-        return UserPlus
-      case "contact_edited":
-        return Edit
-      case "pipeline_moved":
-        return FileText
-      case "appointment_scheduled":
-        return CalendarIcon
-      case "email_sent":
-        return Mail
-      case "user_login":
-        return User
-      default:
-        return Settings
+  // Lấy dữ liệu activity_log thật từ Supabase
+  useEffect(() => {
+    const fetchActivities = async () => {
+      setIsLoading(true)
+      const { data, error } = await supabase
+        .from("activity_log")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(200)
+      setRawActivities(data || [])
+      setIsLoading(false)
     }
-  }
+    fetchActivities()
+  }, [])
 
-  const getActivityColor = (type: string) => {
-    switch (type) {
-      case "contact_added":
-        return "bg-green-100 text-green-800"
-      case "contact_edited":
-        return "bg-blue-100 text-blue-800"
-      case "pipeline_moved":
-        return "bg-purple-100 text-purple-800"
-      case "appointment_scheduled":
-        return "bg-yellow-100 text-yellow-800"
-      case "email_sent":
-        return "bg-indigo-100 text-indigo-800"
-      case "user_login":
-        return "bg-gray-100 text-gray-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
+  // Lấy tất cả tên user cho bộ lọc (dùng luôn detail.userName hoặc user_id)
+  const allUserNames = useMemo(() => {
+    const userSet = new Set<string>()
+    rawActivities.forEach((item) => {
+      let detail = {}
+      try { detail = typeof item.detail === "string" ? JSON.parse(item.detail) : (item.detail || {}) } catch {}
+      if (detail && (detail as any).userName) userSet.add((detail as any).userName)
+      else if (item.user_id) userSet.add(item.user_id)
+    })
+    return ["All Users", ...Array.from(userSet)]
+  }, [rawActivities])
 
+  // Mapping activity về định dạng UI cần
+  const mappedActivities = useMemo(() => {
+    return rawActivities.map((item) => {
+      let parsedDetail: any = {}
+      try {
+        parsedDetail = typeof item.detail === "string" ? JSON.parse(item.detail) : (item.detail || {})
+      } catch { parsedDetail = {} }
+      return {
+        id: item.id,
+        type: item.action_type,
+        action: getActivityLabel(item.action_type),
+        vietnamese: getActivityLabelVn(item.action_type),
+        description: parsedDetail.description || "",
+        vietnameseDescription: parsedDetail.vietnameseDescription || "",
+        user: parsedDetail.userName || item.user_id,
+        userAvatar: parsedDetail.userAvatar || "/placeholder.svg",
+        timestamp: item.created_at
+          ? format(parseISO(item.created_at), "yyyy-MM-dd HH:mm")
+          : "",
+        details: parsedDetail,
+      }
+    })
+  }, [rawActivities])
+
+  // Filter logic
+  const filteredActivities = useMemo(() => {
+    return mappedActivities.filter((activity) => {
+      const matchesSearch =
+        activity.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        activity.user?.toLowerCase().includes(searchTerm.toLowerCase())
+      const matchesType = selectedType === "all" || activity.type === selectedType
+      const matchesUser = selectedUser === "All Users" || activity.user === selectedUser
+      // Lọc theo khoảng thời gian
+      let matchesDate = true
+      if (dateRange?.from) {
+        const ts = activity.timestamp && new Date(activity.timestamp)
+        if (ts && ts < dateRange.from) matchesDate = false
+      }
+      if (dateRange?.to) {
+        const ts = activity.timestamp && new Date(activity.timestamp)
+        if (ts && ts > dateRange.to) matchesDate = false
+      }
+      return matchesSearch && matchesType && matchesUser && matchesDate
+    })
+  }, [mappedActivities, searchTerm, selectedType, selectedUser, dateRange])
+
+  // Export CSV
   const exportActivities = () => {
-    // Create CSV content
     const headers = "Timestamp,User,Action,Description,Type"
     const csvData = filteredActivities
       .map(
         (activity) =>
-          `${activity.timestamp},${activity.user},${activity.action},"${activity.description}",${activity.type}`,
+          `"${activity.timestamp}","${activity.user}","${activity.action}","${activity.description.replace(/"/g, "'")}","${activity.type}"`
       )
       .join("\n")
-
     const csvContent = `${headers}\n${csvData}`
-
-    // Download file
     const blob = new Blob([csvContent], { type: "text/csv" })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -239,7 +189,6 @@ export default function ActivityPage() {
                 className="pl-10"
               />
             </div>
-
             <Select value={selectedType} onValueChange={setSelectedType}>
               <SelectTrigger>
                 <SelectValue placeholder="Activity Type / Loại hoạt động" />
@@ -252,20 +201,18 @@ export default function ActivityPage() {
                 ))}
               </SelectContent>
             </Select>
-
             <Select value={selectedUser} onValueChange={setSelectedUser}>
               <SelectTrigger>
                 <SelectValue placeholder="User / Người dùng" />
               </SelectTrigger>
               <SelectContent>
-                {users.map((user) => (
+                {allUserNames.map((user) => (
                   <SelectItem key={user} value={user}>
                     {user}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="justify-start text-left font-normal bg-transparent">
@@ -314,7 +261,6 @@ export default function ActivityPage() {
             <p className="text-2xl font-bold mt-2">{filteredActivities.length}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -331,7 +277,6 @@ export default function ActivityPage() {
             </p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -348,7 +293,6 @@ export default function ActivityPage() {
             </p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -374,148 +318,103 @@ export default function ActivityPage() {
           <CardDescription>Dòng thời gian hoạt động ({filteredActivities.length})</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {filteredActivities.map((activity, index) => {
-              const IconComponent = getActivityIcon(activity.type)
-
-              return (
-                <div key={activity.id} className="flex gap-4 p-4 border rounded-lg">
-                  <div className="flex-shrink-0">
-                    <div
-                      className={`h-10 w-10 rounded-full flex items-center justify-center ${getActivityColor(activity.type)}`}
-                    >
-                      <IconComponent className="h-5 w-5" />
+          {isLoading ? (
+            <div className="py-8 text-center text-gray-400">Đang tải dữ liệu...</div>
+          ) : (
+            <div className="space-y-4">
+              {filteredActivities.map((activity, index) => {
+                const IconComponent = getActivityIcon(activity.type)
+                return (
+                  <div key={activity.id} className="flex gap-4 p-4 border rounded-lg">
+                    <div className="flex-shrink-0">
+                      <div
+                        className={`h-10 w-10 rounded-full flex items-center justify-center ${getActivityColor(activity.type)}`}
+                      >
+                        <IconComponent className="h-5 w-5" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-medium text-sm">{activity.action}</h4>
+                        <Badge className={getActivityColor(activity.type)}>{activity.type.replace("_", " ")}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1">{activity.vietnamese}</p>
+                      <p className="text-sm text-gray-700 mb-2">{activity.description}</p>
+                      <p className="text-xs text-muted-foreground mb-2">{activity.vietnameseDescription}</p>
+                      {/* Activity Details */}
+                      {activity.details && (
+                        <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
+                          {activity.type === "contact_added" && (
+                            <div className="space-y-1">
+                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
+                              <p><strong>Email:</strong> {activity.details.contactEmail}</p>
+                              <p><strong>Source:</strong> {activity.details.source}</p>
+                            </div>
+                          )}
+                          {activity.type === "pipeline_moved" && (
+                            <div className="space-y-1">
+                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
+                              <p><strong>From:</strong> {activity.details.fromStage} → <strong>To:</strong> {activity.details.toStage}</p>
+                              <p><strong>Value:</strong> {activity.details.value}</p>
+                            </div>
+                          )}
+                          {activity.type === "appointment_scheduled" && (
+                            <div className="space-y-1">
+                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
+                              <p><strong>Date:</strong> {activity.details.appointmentDate}</p>
+                              <p><strong>Type:</strong> {activity.details.type} ({activity.details.duration})</p>
+                            </div>
+                          )}
+                          {activity.type === "contact_edited" && (
+                            <div className="space-y-1">
+                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
+                              <p><strong>Fields Updated:</strong> {activity.details.fieldsUpdated?.join(", ")}</p>
+                              {activity.details.previousCompany && (
+                                <p><strong>Company:</strong> {activity.details.previousCompany} → {activity.details.newCompany}</p>
+                              )}
+                            </div>
+                          )}
+                          {activity.type === "email_sent" && (
+                            <div className="space-y-1">
+                              <p><strong>To:</strong> {activity.details.contactName}</p>
+                              <p><strong>Subject:</strong> {activity.details.subject}</p>
+                              <p><strong>Template:</strong> {activity.details.template}</p>
+                            </div>
+                          )}
+                          {activity.type === "user_login" && (
+                            <div className="space-y-1">
+                              <p><strong>IP:</strong> {activity.details.ipAddress}</p>
+                              <p><strong>Device:</strong> {activity.details.device}</p>
+                              <p><strong>Location:</strong> {activity.details.location}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between mt-3">
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-6 w-6">
+                            <AvatarImage src={activity.userAvatar || "/placeholder.svg"} />
+                            <AvatarFallback>
+                              {activity.user?.split(" ").map((n: string) => n[0]).join("")}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-xs font-medium">{activity.user}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">{activity.timestamp}</span>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h4 className="font-medium text-sm">{activity.action}</h4>
-                      <Badge className={getActivityColor(activity.type)}>{activity.type.replace("_", " ")}</Badge>
-                    </div>
-
-                    <p className="text-xs text-muted-foreground mb-1">{activity.vietnamese}</p>
-
-                    <p className="text-sm text-gray-700 mb-2">{activity.description}</p>
-
-                    <p className="text-xs text-muted-foreground mb-2">{activity.vietnameseDescription}</p>
-
-                    {/* Activity Details */}
-                    {activity.details && (
-                      <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
-                        {activity.type === "contact_added" && (
-                          <div className="space-y-1">
-                            <p>
-                              <strong>Contact:</strong> {activity.details.contactName}
-                            </p>
-                            <p>
-                              <strong>Email:</strong> {activity.details.contactEmail}
-                            </p>
-                            <p>
-                              <strong>Source:</strong> {activity.details.source}
-                            </p>
-                          </div>
-                        )}
-                        {activity.type === "pipeline_moved" && (
-                          <div className="space-y-1">
-                            <p>
-                              <strong>Contact:</strong> {activity.details.contactName}
-                            </p>
-                            <p>
-                              <strong>From:</strong> {activity.details.fromStage} → <strong>To:</strong>{" "}
-                              {activity.details.toStage}
-                            </p>
-                            <p>
-                              <strong>Value:</strong> {activity.details.value}
-                            </p>
-                          </div>
-                        )}
-                        {activity.type === "appointment_scheduled" && (
-                          <div className="space-y-1">
-                            <p>
-                              <strong>Contact:</strong> {activity.details.contactName}
-                            </p>
-                            <p>
-                              <strong>Date:</strong> {activity.details.appointmentDate}
-                            </p>
-                            <p>
-                              <strong>Type:</strong> {activity.details.type} ({activity.details.duration})
-                            </p>
-                          </div>
-                        )}
-                        {activity.type === "contact_edited" && (
-                          <div className="space-y-1">
-                            <p>
-                              <strong>Contact:</strong> {activity.details.contactName}
-                            </p>
-                            <p>
-                              <strong>Fields Updated:</strong> {activity.details.fieldsUpdated.join(", ")}
-                            </p>
-                            {activity.details.previousCompany && (
-                              <p>
-                                <strong>Company:</strong> {activity.details.previousCompany} →{" "}
-                                {activity.details.newCompany}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        {activity.type === "email_sent" && (
-                          <div className="space-y-1">
-                            <p>
-                              <strong>To:</strong> {activity.details.contactName}
-                            </p>
-                            <p>
-                              <strong>Subject:</strong> {activity.details.subject}
-                            </p>
-                            <p>
-                              <strong>Template:</strong> {activity.details.template}
-                            </p>
-                          </div>
-                        )}
-                        {activity.type === "user_login" && (
-                          <div className="space-y-1">
-                            <p>
-                              <strong>IP:</strong> {activity.details.ipAddress}
-                            </p>
-                            <p>
-                              <strong>Device:</strong> {activity.details.device}
-                            </p>
-                            <p>
-                              <strong>Location:</strong> {activity.details.location}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between mt-3">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="h-6 w-6">
-                          <AvatarImage src={activity.userAvatar || "/placeholder.svg"} />
-                          <AvatarFallback>
-                            {activity.user
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="text-xs font-medium">{activity.user}</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground">{activity.timestamp}</span>
-                    </div>
-                  </div>
+                )
+              })}
+              {filteredActivities.length === 0 && (
+                <div className="text-center py-8">
+                  <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No activities found</p>
+                  <p className="text-sm text-muted-foreground">Không tìm thấy hoạt động nào</p>
                 </div>
-              )
-            })}
-
-            {filteredActivities.length === 0 && (
-              <div className="text-center py-8">
-                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500">No activities found</p>
-                <p className="text-sm text-muted-foreground">Không tìm thấy hoạt động nào</p>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

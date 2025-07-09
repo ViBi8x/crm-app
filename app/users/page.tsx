@@ -279,44 +279,48 @@ export default function UsersPage() {
 
   // Sửa user (bảng profiles)
   const handleEditUser = useCallback(async () => {
-    if (!selectedUser) return;
-    const userId = selectedUser.id;
+  if (!selectedUser) return;
+  const userId = selectedUser.id;
 
-    // 1. Kiểm tra trùng email/phone (ngoại trừ chính user này)
-    const { data: existed } = await supabase
-      .from("profiles")
-      .select("id")
-      .or(`email.eq.${formData.email},phone.eq.${formData.phone}`)
-      .neq("id", userId);
+  // 1. Kiểm tra trùng email/phone (ngoại trừ chính user này)
+  const { data: existed } = await supabase
+    .from("profiles")
+    .select("id")
+    .or(`email.eq.${formData.email},phone.eq.${formData.phone}`)
+    .neq("id", userId);
 
-    if (existed && existed.length > 0) {
-      toast.error("Email hoặc số điện thoại đã tồn tại, vui lòng nhập lại!");
-      return;
-    }
+  if (existed && existed.length > 0) {
+    toast.error("Email hoặc số điện thoại đã tồn tại, vui lòng nhập lại!");
+    return;
+  }
 
-    // 2. Update
-    const update = {
-      full_name: formData.name,
-      phone: formData.phone,
-      role: formData.role,
-      status: formData.status,
-    };
-    const { error } = await supabase.from("profiles").update(update).eq("id", userId);
-    if (error) {
-      toast.error("Update user failed!");
-      return;
-    }
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === userId
-          ? { ...u, ...formData, name: formData.name, permissions: getDefaultPermissions(formData.role) }
-          : u
-      )
-    );
-    setIsEditDialogOpen(false);
-    setSelectedUser(null);
-    toast.success("Đã cập nhật người dùng thành công!");
-  }, [selectedUser, formData]);
+  // 2. Update ĐẦY ĐỦ trường, kể cả email
+  const update = {
+    full_name: formData.name,
+    phone: formData.phone,
+    role: formData.role,
+    status: formData.status,
+    email: formData.email,         // << Thêm dòng này nếu chưa có
+    // avatar_url: ... nếu cần
+  };
+  const { error } = await supabase.from("profiles").update(update).eq("id", userId);
+  if (error) {
+    toast.error("Update user failed!");
+    return;
+  }
+  setUsers((prev) =>
+    prev.map((u) =>
+      u.id === userId
+        ? { ...u, ...formData, name: formData.name, permissions: getDefaultPermissions(formData.role) }
+        : u
+    )
+  );
+  setIsEditDialogOpen(false);
+  setSelectedUser(null);
+  toast.success("Đã cập nhật người dùng thành công!");
+}, [selectedUser, formData]);
+
+
 
 
   // Xoá user (bảng profiles)
