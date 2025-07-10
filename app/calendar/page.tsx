@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { supabase } from "@/lib/supabaseClient"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -30,66 +31,8 @@ import {
   isToday,
   addMonths,
   subMonths,
+  parseISO,
 } from "date-fns"
-
-// Mock appointment data
-const initialAppointments = [
-  {
-    id: 1,
-    title: "Client Meeting",
-    vietnamese: "Họp với khách hàng",
-    date: new Date(2024, 0, 15),
-    time: "09:00",
-    type: "meeting",
-    location: "Conference Room A",
-    attendees: "John Doe, Jane Smith",
-    description: "Quarterly business review with key client",
-  },
-  {
-    id: 2,
-    title: "Sales Call",
-    vietnamese: "Cuộc gọi bán hàng",
-    date: new Date(2024, 0, 15),
-    time: "14:00",
-    type: "call",
-    location: "Phone",
-    attendees: "Mike Johnson",
-    description: "Follow-up call with potential customer",
-  },
-  {
-    id: 3,
-    title: "Product Demo",
-    vietnamese: "Demo sản phẩm",
-    date: new Date(2024, 0, 16),
-    time: "10:30",
-    type: "demo",
-    location: "Online - Zoom",
-    attendees: "Sarah Wilson, Tom Brown",
-    description: "Product demonstration for new prospects",
-  },
-  {
-    id: 4,
-    title: "Team Standup",
-    vietnamese: "Họp nhóm",
-    date: new Date(2024, 0, 17),
-    time: "09:00",
-    type: "meeting",
-    location: "Office",
-    attendees: "Development Team",
-    description: "Daily team synchronization meeting",
-  },
-  {
-    id: 5,
-    title: "Client Presentation",
-    vietnamese: "Thuyết trình khách hàng",
-    date: new Date(2024, 0, 18),
-    time: "15:00",
-    type: "demo",
-    location: "Client Office",
-    attendees: "ABC Corp Team",
-    description: "Final proposal presentation to client",
-  },
-]
 
 const appointmentTypes = [
   { value: "meeting", label: "Meeting", vietnamese: "Cuộc họp" },
@@ -129,7 +72,8 @@ const getAppointmentColor = (type: string) => {
 
 export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date())
-  const [appointments, setAppointments] = useState(initialAppointments)
+  const [appointments, setAppointments] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [newAppointment, setNewAppointment] = useState({
@@ -140,6 +84,33 @@ export default function CalendarPage() {
     attendees: "",
     description: "",
   })
+
+  // Fetch appointments from Supabase
+  useEffect(() => {
+    fetchAppointments()
+    // eslint-disable-next-line
+  }, [currentMonth])
+
+  useEffect(() => {
+  console.log("Appointments from Supabase: ", appointments);
+}, [appointments]);
+
+  
+  const fetchAppointments = async () => {
+    setLoading(true)
+    // Get range for current month
+    const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)
+    const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59)
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("*")
+      .gte("scheduled_at", start.toISOString())
+      .lte("scheduled_at", end.toISOString())
+      .order("scheduled_at", { ascending: true })
+
+    if (!error && data) setAppointments(data)
+    setLoading(false)
+  }
 
   // Generate calendar grid
   const monthStart = startOfMonth(currentMonth)
@@ -159,7 +130,6 @@ export default function CalendarPage() {
   const handleDayClick = (date: Date) => {
     setSelectedDate(date)
     setNewAppointment({
-      ...newAppointment,
       title: "",
       type: "meeting",
       time: "",
@@ -170,34 +140,72 @@ export default function CalendarPage() {
     setIsDialogOpen(true)
   }
 
-  const handleSaveAppointment = () => {
+  // Save appointment to Supabase
+  const handleSaveAppointment = async () => {
     if (!selectedDate || !newAppointment.title || !newAppointment.time) return
+    setLoading(true)
 
-    const appointment = {
-      id: appointments.length + 1,
-      title: newAppointment.title,
-      vietnamese: newAppointment.title, // In real app, this would be translated
-      date: selectedDate,
-      time: newAppointment.time,
-      type: newAppointment.type,
-      location: newAppointment.location,
-      attendees: newAppointment.attendees,
-      description: newAppointment.description,
+    // Lấy user id từ session Supabase Auth
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (!user || userError) {
+      alert("Bạn chưa đăng nhập hoặc không lấy được user id")
+      setLoading(false)
+      return
     }
+    const userId = user.id
 
-    setAppointments([...appointments, appointment])
-    setIsDialogOpen(false)
-    setSelectedDate(null)
+    // Combine date + time to ISO string
+    const yyyy = selectedDate.getFullYear()
+    const mm = String(selectedDate.getMonth() + 1).padStart(2, '0')
+    const dd = String(selectedDate.getDate()).padStart(2, '0')
+    const time = newAppointment.time // "09:00"
+    const scheduled_at = `${yyyy}-${mm}-${dd}T${time}:00+07:00` // adjust timezone if needed
+
+    // attendees là array (nếu cột trong DB là text[])
+    const attendeesArray = newAppointment.attendees
+      ? newAppointment.attendees.split(",").map((s) => s.trim())
+      : []
+
+    const { error } = await supabase.from("appointments").insert([{
+      title: newAppointment.title,
+      type: newAppointment.type,
+      scheduled_at,
+      note: newAppointment.description || newAppointment.location || "",
+      attendees: attendeesArray,
+      created_by: userId,
+    }])
+
+    if (!error) {
+      await fetchAppointments()
+      setIsDialogOpen(false)
+      setSelectedDate(null)
+    } else {
+      alert("Lỗi khi tạo appointment: " + error.message)
+    }
+    setLoading(false)
   }
 
+  // Chuyển đổi appointment từ Supabase sang format cho calendar grid
   const getAppointmentsForDate = (date: Date) => {
-    return appointments.filter((apt) => isSameDay(apt.date, date))
-  }
+  const filtered = appointments.filter((apt) => {
+    const aptDate = apt.scheduled_at ? parseISO(apt.scheduled_at) : null
+    return aptDate && isSameDay(aptDate, date)
+  });
+  console.log("Date: ", date, "Filtered: ", filtered);
+  return filtered.map((apt) => ({
+    ...apt,
+    time: apt.scheduled_at ? format(parseISO(apt.scheduled_at), "HH:mm") : "",
+    description: apt.note || ""
+  }))
+}
 
-  // Calculate monthly statistics
-  const monthlyAppointments = appointments.filter(
-    (apt) => apt.date.getMonth() === currentMonth.getMonth() && apt.date.getFullYear() === currentMonth.getFullYear(),
-  )
+  // Monthly statistics
+  const monthlyAppointments = appointments.filter((apt) => {
+    const aptDate = apt.scheduled_at ? parseISO(apt.scheduled_at) : null
+    return aptDate &&
+      aptDate.getMonth() === currentMonth.getMonth() &&
+      aptDate.getFullYear() === currentMonth.getFullYear()
+  })
 
   const stats = {
     total: monthlyAppointments.length,
@@ -321,6 +329,7 @@ export default function CalendarPage() {
                           min-h-[100px] p-2 border border-gray-200 cursor-pointer transition-colors hover:bg-accent
                           ${isCurrentMonth ? "bg-white" : "bg-gray-50"}
                           ${isDayToday ? "bg-blue-50 border-blue-300 border-2" : ""}
+                          relative
                         `}
                       >
                         <div
@@ -335,7 +344,7 @@ export default function CalendarPage() {
 
                         {/* Appointment indicators */}
                         <div className="space-y-1">
-                          {dayAppointments.slice(0, 3).map((appointment) => (
+                          {dayAppointments.slice(0, 3).map((appointment: any) => (
                             <Tooltip key={appointment.id}>
                               <TooltipTrigger asChild>
                                 <div
@@ -351,7 +360,6 @@ export default function CalendarPage() {
                               <TooltipContent>
                                 <div className="text-sm">
                                   <div className="font-medium">{appointment.title}</div>
-                                  <div className="text-xs text-muted-foreground">{appointment.vietnamese}</div>
                                   <div className="text-xs">{appointment.time}</div>
                                 </div>
                               </TooltipContent>
@@ -429,7 +437,7 @@ export default function CalendarPage() {
               <CardContent>
                 {getAppointmentsForDate(new Date()).length > 0 ? (
                   <div className="space-y-2">
-                    {getAppointmentsForDate(new Date()).map((appointment) => (
+                    {getAppointmentsForDate(new Date()).map((appointment: any) => (
                       <div key={appointment.id} className="flex items-center gap-2 p-2 border rounded">
                         <div className={`p-1 rounded ${getAppointmentColor(appointment.type)}`}>
                           {getAppointmentIcon(appointment.type)}
@@ -530,7 +538,7 @@ export default function CalendarPage() {
                   id="attendees"
                   value={newAppointment.attendees}
                   onChange={(e) => setNewAppointment({ ...newAppointment, attendees: e.target.value })}
-                  placeholder="Enter attendee names..."
+                  placeholder="Enter attendee names, separated by commas..."
                 />
               </div>
 
@@ -551,8 +559,8 @@ export default function CalendarPage() {
               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancel / Hủy
               </Button>
-              <Button onClick={handleSaveAppointment} disabled={!newAppointment.title || !newAppointment.time}>
-                Schedule / Đặt lịch
+              <Button onClick={handleSaveAppointment} disabled={!newAppointment.title || !newAppointment.time || loading}>
+                {loading ? "Scheduling..." : "Schedule / Đặt lịch"}
               </Button>
             </DialogFooter>
           </DialogContent>

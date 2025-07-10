@@ -932,11 +932,12 @@ const handleDeleteActivity = async (activityId: string) => {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge className={getLifeStageColor(contact.life_stage)}>{LIFE_STAGE_OPTIONS.find(l => l.value === contact.life_stage)?.label || contact.life_stage}</Badge>
-                  {/*<Badge className={getSourceColor(contact.source)}>{contact.source}</Badge>*/}
+                  
                   <div className="flex gap-1">
                     <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
                       <Eye className="h-4 w-4" />
                     </Button>
+                    
                     <Button variant="ghost" size="sm" onClick={() => handleEditContact(contact)}>
                       <Edit className="h-4 w-4" />
                     </Button>
