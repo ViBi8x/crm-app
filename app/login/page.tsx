@@ -33,25 +33,69 @@ export default function LoginPage() {
 
   // Đăng nhập thật với Supabase
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError("");
+  e.preventDefault();
+  setIsLoading(true);
+  setError("");
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: formData.email,
-      password: formData.password,
-    });
+  // Đăng nhập với Supabase Auth
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: formData.email,
+    password: formData.password,
+  });
 
-    if (error) {
-      setError("Email hoặc mật khẩu không đúng / Invalid email or password");
-      setIsLoading(false);
-      return;
-    }
-
-    toast.success("Đăng nhập thành công / Login successful!");
-    router.push("/dashboard");
+  if (error) {
+    setError("Email hoặc mật khẩu không đúng / Invalid email or password");
     setIsLoading(false);
-  };
+    return;
+  }
+
+  toast.success("Đăng nhập thành công / Login successful!");
+
+  // Lấy user id từ kết quả đăng nhập
+  const userId = data.user.id;
+
+  // Lấy thông tin profile từ bảng profiles (giả sử bạn có bảng này)
+  let userProfile = null;
+  try {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('id', userId)
+      .single();
+
+    if (!profileError && profile) {
+      userProfile = {
+        id: profile.id,
+        full_name: profile.full_name,
+        email: profile.email,
+      };
+    } else {
+      // Nếu không có profile riêng, fallback dùng data.user
+      userProfile = {
+        id: data.user.id,
+        email: data.user.email,
+        full_name: data.user.user_metadata?.full_name || ""
+      };
+    }
+  } catch {
+    // Lỗi không fetch được profile
+    userProfile = {
+      id: data.user.id,
+      email: data.user.email,
+      full_name: data.user.user_metadata?.full_name || ""
+    };
+  }
+
+  // Lưu vào localStorage
+  if (typeof window !== "undefined") {
+    localStorage.setItem("user", JSON.stringify(userProfile));
+  }
+
+  // Chuyển trang
+  router.push("/dashboard");
+  setIsLoading(false);
+};
+
 
   // Quên mật khẩu với Supabase
   const handleForgotPassword = async () => {

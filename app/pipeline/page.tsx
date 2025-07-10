@@ -175,32 +175,63 @@ export default function PipelinePage() {
   }
 
   // Xác nhận chuyển stage (update Supabase)
-  const confirmMove = async () => {
-    const { contact, fromColumn, toColumn } = moveDialog
-    if (!contact || !contact.id) return
+const confirmMove = async () => {
+  const { contact, fromColumn, toColumn } = moveDialog;
+  if (!contact || !contact.id) return;
 
-    const { error } = await supabase
-      .from('contacts')
-      .update({ life_stage: toColumn })
-      .eq('id', contact.id)
+  const { error } = await supabase
+    .from('contacts')
+    .update({ life_stage: toColumn })
+    .eq('id', contact.id);
 
-    if (error) {
-      setMoveDialog({ ...moveDialog, isOpen: false })
-      return
-    }
+  if (error) {
+    setMoveDialog({ ...moveDialog, isOpen: false });
+    return;
+  }
 
-    // Có thể fetch lại hoặc update local state như cũ
-    setColumns((prev: any) => {
-      const sourceContacts = prev[fromColumn].contacts.filter((c: any) => c.id !== contact.id)
-      const destContacts = [...prev[toColumn].contacts, { ...contact, life_stage: toColumn }]
-      return {
-        ...prev,
-        [fromColumn]: { ...prev[fromColumn], contacts: sourceContacts },
-        [toColumn]: { ...prev[toColumn], contacts: destContacts },
+  // Lấy user từ localStorage (hoặc context, hoặc prop nếu có)
+  let user = null;
+  try {
+    user = JSON.parse(localStorage.getItem("user") || "{}");
+  } catch {}
+  if (!user?.id) {
+    alert("Không xác định được user thực hiện thao tác. Vui lòng đăng nhập lại!");
+    setMoveDialog({ ...moveDialog, isOpen: false });
+    return;
+  }
+
+  const res = await fetch("/api/activity/log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: user.id, // luôn truyền đúng id uuid
+      action_type: "pipeline_moved",
+      target_id: contact.id,
+      target_type: "contact",
+      detail: {
+        contactName: contact.name,
+        from: fromColumn,
+        to: toColumn,
+        userName: user.full_name || "",
       }
     })
-    setMoveDialog({ isOpen: false, contact: null, fromColumn: "", toColumn: "" })
-  }
+  });
+  const resJson = await res.json();
+  console.log("Log pipeline response", res.status, resJson);
+
+  setColumns((prev: any) => {
+    const sourceContacts = prev[fromColumn].contacts.filter((c: any) => c.id !== contact.id);
+    const destContacts = [...prev[toColumn].contacts, { ...contact, life_stage: toColumn }];
+    return {
+      ...prev,
+      [fromColumn]: { ...prev[fromColumn], contacts: sourceContacts },
+      [toColumn]: { ...prev[toColumn], contacts: destContacts },
+    }
+  });
+  setMoveDialog({ isOpen: false, contact: null, fromColumn: "", toColumn: "" });
+};
+
+
 
   const getColumnColor = (columnId: string) => {
     const stage = stages.find((s) => s.id === columnId)

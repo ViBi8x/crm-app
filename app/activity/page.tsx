@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Search, CalendarIcon, User, UserPlus, Edit, Mail, FileText, Settings, Download } from "lucide-react"
+import { Search, CalendarIcon, User, UserPlus, Edit, Mail, FileText, Settings, Download, Trash2, ArrowRightLeft } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -17,7 +17,9 @@ import { supabase } from "@/lib/supabaseClient"
 const activityTypes = [
   { value: "all", label: "All Activities / Tất cả hoạt động" },
   { value: "contact_added", label: "Contact Added / Thêm liên hệ" },
-  { value: "contact_edited", label: "Contact Updated / Cập nhật liên hệ" },
+  { value: "contact_updated", label: "Contact Updated / Cập nhật liên hệ" },
+  { value: "contact_deleted", label: "Contact Deleted / Xóa liên hệ" },
+  { value: "life_stage_changed", label: "Life Stage Changed / Thay đổi giai đoạn" },
   { value: "pipeline_moved", label: "Pipeline Changes / Thay đổi quy trình" },
   { value: "appointment_scheduled", label: "Appointments / Cuộc hẹn" },
   { value: "email_sent", label: "Email Sent / Gửi email" },
@@ -27,7 +29,9 @@ const activityTypes = [
 function getActivityIcon(type: string) {
   switch (type) {
     case "contact_added": return UserPlus
-    case "contact_edited": return Edit
+    case "contact_updated": return Edit
+    case "contact_deleted": return Trash2
+    case "life_stage_changed": return ArrowRightLeft
     case "pipeline_moved": return FileText
     case "appointment_scheduled": return CalendarIcon
     case "email_sent": return Mail
@@ -39,7 +43,9 @@ function getActivityIcon(type: string) {
 function getActivityColor(type: string) {
   switch (type) {
     case "contact_added": return "bg-green-100 text-green-800"
-    case "contact_edited": return "bg-blue-100 text-blue-800"
+    case "contact_updated": return "bg-blue-100 text-blue-800"
+    case "contact_deleted": return "bg-red-100 text-red-800"
+    case "life_stage_changed": return "bg-yellow-100 text-yellow-800"
     case "pipeline_moved": return "bg-purple-100 text-purple-800"
     case "appointment_scheduled": return "bg-yellow-100 text-yellow-800"
     case "email_sent": return "bg-indigo-100 text-indigo-800"
@@ -53,6 +59,12 @@ function getActivityLabel(type: string) {
 }
 function getActivityLabelVn(type: string) {
   return activityTypes.find((t) => t.value === type)?.label?.split(" / ")[1] || "Hoạt động"
+}
+
+function formatTimestamp(ts: string | undefined) {
+  if (!ts) return ""
+  const date = new Date(ts)
+  return date.toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short", year: "numeric" })
 }
 
 export default function ActivityPage() {
@@ -102,8 +114,6 @@ export default function ActivityPage() {
         type: item.action_type,
         action: getActivityLabel(item.action_type),
         vietnamese: getActivityLabelVn(item.action_type),
-        description: parsedDetail.description || "",
-        vietnameseDescription: parsedDetail.vietnameseDescription || "",
         user: parsedDetail.userName || item.user_id,
         userAvatar: parsedDetail.userAvatar || "/placeholder.svg",
         timestamp: item.created_at
@@ -118,11 +128,10 @@ export default function ActivityPage() {
   const filteredActivities = useMemo(() => {
     return mappedActivities.filter((activity) => {
       const matchesSearch =
-        activity.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (activity.details?.contactName?.toLowerCase?.() ?? "")?.includes(searchTerm.toLowerCase()) ||
         activity.user?.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesType = selectedType === "all" || activity.type === selectedType
       const matchesUser = selectedUser === "All Users" || activity.user === selectedUser
-      // Lọc theo khoảng thời gian
       let matchesDate = true
       if (dateRange?.from) {
         const ts = activity.timestamp && new Date(activity.timestamp)
@@ -136,13 +145,21 @@ export default function ActivityPage() {
     })
   }, [mappedActivities, searchTerm, selectedType, selectedUser, dateRange])
 
+
+  const stageMap = {
+  subscriber: "Người đăng ký",
+  lead: "Khách tiềm năng",
+  opportunity: "Cơ hội",
+  customer: "Khách hàng"
+}
+
   // Export CSV
   const exportActivities = () => {
-    const headers = "Timestamp,User,Action,Description,Type"
+    const headers = "Timestamp,User,Action,Contact,Detail,Type"
     const csvData = filteredActivities
       .map(
         (activity) =>
-          `"${activity.timestamp}","${activity.user}","${activity.action}","${activity.description.replace(/"/g, "'")}","${activity.type}"`
+          `"${activity.timestamp}","${activity.user}","${activity.action}","${activity.details.contactName || ""}","${JSON.stringify(activity.details).replace(/"/g, "'")}","${activity.type}"`
       )
       .join("\n")
     const csvContent = `${headers}\n${csvData}`
@@ -153,6 +170,129 @@ export default function ActivityPage() {
     a.download = `activity_log_${format(new Date(), "yyyy-MM-dd")}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
+  }
+
+  // -------- Render details log ra giao diện rõ ràng --------
+  function renderActivityDetails(type: string, details: any) {
+    if (!details) return null
+    switch (type) {
+      case "contact_added":
+        return (
+          <div>
+            <p><b>Liên hệ:</b> {details.contactName}</p>
+            {details.contactEmail && <p><b>Email:</b> {details.contactEmail}</p>}
+          </div>
+        )
+      case "contact_updated":
+        return (
+          <div>
+            <p><b>Liên hệ:</b> {details.contactName}</p>
+            {details.fieldsChanged?.length > 0 &&
+              <div>
+                <b>Trường thay đổi:</b>
+                <ul className="ml-4 list-disc">
+                  {details.fieldsChanged.map((field: string) => (
+                    <li key={field}>
+                      <span className="font-semibold">{field}</span>:&nbsp;
+                      <span className="text-red-700 line-through">{String(details.oldData?.[field] ?? "")}</span>
+                      &nbsp;
+                      <span className="text-gray-500">→</span>
+                      &nbsp;
+                      <span className="text-green-700">{String(details.newData?.[field] ?? "")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            }
+          </div>
+        )
+      
+case "contact_deleted":
+  return (
+    <div className="space-y-1">
+      <p>
+        Đã xoá liên hệ:
+        <b>
+          {details?.name
+            ? ` ${details.name}`
+            : details?.email
+            ? ` ${details.email}`
+            : ""}
+        </b>
+        {details?.company ? ` (${details.company})` : ""}
+      </p>
+      {details?.email && (
+        <div className="text-xs text-muted-foreground">
+          Email: {details.email}
+        </div>
+      )}
+      {details?.phone && (
+        <div className="text-xs text-muted-foreground">
+          Phone: {details.phone}
+        </div>
+      )}
+    </div>
+  )
+
+case "assigned_changed":
+  return (
+    <div>
+      <p><b>Liên hệ:</b> {details.contactName}</p>
+      <p>
+        <b>Người phụ trách:</b>
+        <span className="ml-2 text-red-700">{details.from}</span>
+        &nbsp;<span className="text-gray-500">→</span>&nbsp;
+        <span className="text-green-700">{details.to}</span>
+      </p>
+    </div>
+  );
+
+case "contact_activity_added":
+  return (
+    <div>
+      <p>
+        <b>Liên hệ:</b> {details.contactName}
+        <br />
+        <b>Hoạt động:</b> {details.activityType}
+      </p>
+      {details.note && <div className="text-xs text-muted-foreground">Nội dung: {details.note}</div>}
+      {details.duration && <div className="text-xs">Thời lượng: {details.duration} phút</div>}
+      {details.location && <div className="text-xs">Địa điểm: {details.location}</div>}
+      {details.action_time && <div className="text-xs">Thời gian: {formatTimestamp(details.action_time)}</div>}
+    </div>
+  );
+
+case "pipeline_moved":
+  return (
+    <div className="space-y-1">
+      <p>
+        <b>Liên hệ:</b> {details.contactName}
+      </p>
+      <p>
+        <b>Chuyển từ:</b> <span className="text-red-700">{stageMap[details.from] || details.from}</span>
+        {" → "}
+        <span className="text-green-700">{stageMap[details.to] || details.to}</span>
+      </p>
+    </div>
+  );
+      case "life_stage_changed":
+        return (
+          <div>
+            <p><b>Liên hệ:</b> {details.contactName}</p>
+            <p>
+              <b>Giai đoạn:</b>
+              <span className="ml-2 text-red-700">{details.from}</span>
+              &nbsp;<span className="text-gray-500">→</span>&nbsp;
+              <span className="text-green-700">{details.to}</span>
+            </p>
+          </div>
+        )
+      // Các loại khác giữ nguyên
+      default:
+        return Object.keys(details).length > 0 ? (
+          <pre className="text-xs text-gray-600 bg-gray-50 p-2 rounded">{JSON.stringify(details, null, 2)}</pre>
+        ) : null
+    }
   }
 
   return (
@@ -167,7 +307,6 @@ export default function ActivityPage() {
           Export Log / Xuất nhật ký
         </Button>
       </div>
-
       {/* Filters */}
       <Card>
         <CardHeader>
@@ -322,7 +461,7 @@ export default function ActivityPage() {
             <div className="py-8 text-center text-gray-400">Đang tải dữ liệu...</div>
           ) : (
             <div className="space-y-4">
-              {filteredActivities.map((activity, index) => {
+              {filteredActivities.map((activity) => {
                 const IconComponent = getActivityIcon(activity.type)
                 return (
                   <div key={activity.id} className="flex gap-4 p-4 border rounded-lg">
@@ -339,57 +478,8 @@ export default function ActivityPage() {
                         <Badge className={getActivityColor(activity.type)}>{activity.type.replace("_", " ")}</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground mb-1">{activity.vietnamese}</p>
-                      <p className="text-sm text-gray-700 mb-2">{activity.description}</p>
-                      <p className="text-xs text-muted-foreground mb-2">{activity.vietnameseDescription}</p>
-                      {/* Activity Details */}
-                      {activity.details && (
-                        <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
-                          {activity.type === "contact_added" && (
-                            <div className="space-y-1">
-                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
-                              <p><strong>Email:</strong> {activity.details.contactEmail}</p>
-                              <p><strong>Source:</strong> {activity.details.source}</p>
-                            </div>
-                          )}
-                          {activity.type === "pipeline_moved" && (
-                            <div className="space-y-1">
-                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
-                              <p><strong>From:</strong> {activity.details.fromStage} → <strong>To:</strong> {activity.details.toStage}</p>
-                              <p><strong>Value:</strong> {activity.details.value}</p>
-                            </div>
-                          )}
-                          {activity.type === "appointment_scheduled" && (
-                            <div className="space-y-1">
-                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
-                              <p><strong>Date:</strong> {activity.details.appointmentDate}</p>
-                              <p><strong>Type:</strong> {activity.details.type} ({activity.details.duration})</p>
-                            </div>
-                          )}
-                          {activity.type === "contact_edited" && (
-                            <div className="space-y-1">
-                              <p><strong>Contact:</strong> {activity.details.contactName}</p>
-                              <p><strong>Fields Updated:</strong> {activity.details.fieldsUpdated?.join(", ")}</p>
-                              {activity.details.previousCompany && (
-                                <p><strong>Company:</strong> {activity.details.previousCompany} → {activity.details.newCompany}</p>
-                              )}
-                            </div>
-                          )}
-                          {activity.type === "email_sent" && (
-                            <div className="space-y-1">
-                              <p><strong>To:</strong> {activity.details.contactName}</p>
-                              <p><strong>Subject:</strong> {activity.details.subject}</p>
-                              <p><strong>Template:</strong> {activity.details.template}</p>
-                            </div>
-                          )}
-                          {activity.type === "user_login" && (
-                            <div className="space-y-1">
-                              <p><strong>IP:</strong> {activity.details.ipAddress}</p>
-                              <p><strong>Device:</strong> {activity.details.device}</p>
-                              <p><strong>Location:</strong> {activity.details.location}</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      {/* Hiển thị chi tiết cụ thể từng log */}
+                      {renderActivityDetails(activity.type, activity.details)}
                       <div className="flex items-center justify-between mt-3">
                         <div className="flex items-center gap-2">
                           <Avatar className="h-6 w-6">
