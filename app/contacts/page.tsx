@@ -101,12 +101,33 @@ function formatTimestamp(ts: string | undefined) {
   return date.toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short", year: "numeric" })
 }
 
+function toDatetimeLocal(dtString) {
+  if (!dtString) return "";
+  const dt = new Date(dtString);
+  const offset = dt.getTimezoneOffset();
+  const local = new Date(dt.getTime() - offset * 60 * 1000);
+  return local.toISOString().slice(0, 16); // format 'yyyy-MM-ddTHH:mm'
+}
+
+const fetchNextAppointmentDuration = async (contactId, scheduledAt) => {
+  if (!contactId || !scheduledAt) return 30;
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("duration_min")
+    .eq("contact_id", contactId)
+    .eq("scheduled_at", scheduledAt)
+    .single();
+  return (!error && data?.duration_min) ? data.duration_min : 30;
+};
+
+
 export default function ContactsPage() {
   // ----------------- State -----------------
   const { user } = useAuth()
 
   const [showDateEdit, setShowDateEdit] = useState(false);
   const [appointmentDate, setAppointmentDate] = React.useState("");
+  const [appointmentDuration, setAppointmentDuration] = useState(30); 
 
   // Activities History
   const [activities, setActivities] = useState<any[]>([])
@@ -307,30 +328,46 @@ const handleAddContact = async () => {
 }
 
 
+
+
 const handleSaveAppointmentDate = async () => {
   if (!selectedContact || !appointmentDate) return;
 
-  // Chuyển thành UTC ISO string (chuẩn)
+  // 1. Lấy UTC chuẩn
   const utcISOString = new Date(appointmentDate).toISOString();
 
-  // 1. Kiểm tra trùng lịch của chính sales đó (user)
-  const { data: conflictAppointments, error: checkError } = await supabase
+  // 2. Lấy duration từ state (người dùng chọn trên dialog), fallback 30
+  const duration_min = Number(appointmentDuration) || 30;
+
+  // 3. Tính khoảng thời gian sự kiện mới
+  const newStart = new Date(utcISOString);
+  const newEnd = new Date(newStart.getTime() + duration_min * 60 * 1000);
+
+  // 4. Lấy tất cả appointment của user (sales) để check overlap
+  const { data: appointments, error: fetchError } = await supabase
     .from("appointments")
-    .select("id")
-    .eq("scheduled_at", utcISOString)
-    .eq("created_by", user?.id); // user.id là sales hiện tại
+    .select("id, scheduled_at, duration_min")
+    .eq("created_by", user?.id);
 
-  if (checkError) {
-    toast.error("Lỗi kiểm tra trùng lịch: " + checkError.message);
+  if (fetchError) {
+    toast.error("Lỗi kiểm tra trùng lịch: " + fetchError.message);
     return;
   }
 
-  if (conflictAppointments && conflictAppointments.length > 0) {
-    toast.error("Bạn đã có lịch hẹn khác vào thời điểm này. Vui lòng chọn thời gian khác!");
+  // 5. Check conflict: overlap
+  const isConflict = appointments.some((apt) => {
+    const existStart = new Date(apt.scheduled_at);
+    const existDuration = Number(apt.duration_min) || 30;
+    const existEnd = new Date(existStart.getTime() + existDuration * 60 * 1000);
+    return newStart < existEnd && existStart < newEnd;
+  });
+
+  if (isConflict) {
+    toast.error("Bạn đã có lịch hẹn khác bị trùng trong khoảng thời gian này. Vui lòng chọn thời gian khác!");
     return;
   }
 
-  // 2. Update trường next_appointment_at cho contact
+  // 6. Update next_appointment_at cho contact
   const { error } = await supabase
     .from("contacts")
     .update({ next_appointment_at: utcISOString })
@@ -343,7 +380,7 @@ const handleSaveAppointmentDate = async () => {
     });
     setShowDateEdit(false);
 
-    // 3. Insert vào bảng appointments
+    // 7. Insert vào bảng appointments
     const { error: insertError } = await supabase.from("appointments").insert([{
       contact_id: selectedContact.id,
       title: `Lịch hẹn với ${selectedContact.name}`,
@@ -351,6 +388,7 @@ const handleSaveAppointmentDate = async () => {
       scheduled_at: utcISOString,
       status: "scheduled",
       created_by: user?.id,
+      duration_min,
     }]);
 
     if (insertError) {
@@ -361,6 +399,18 @@ const handleSaveAppointmentDate = async () => {
   } else {
     toast.error("Lỗi khi lưu lịch hẹn: " + error.message);
   }
+};
+
+
+// Edit Lịch hẹn sắp tới
+const handleEditNextAppointment = () => {
+  setAppointmentDate(
+    selectedContact?.next_appointment_at
+      ? new Date(selectedContact.next_appointment_at).toISOString().slice(0,16) // ISO string cho input datetime-local
+      : ""
+  );
+  setAppointmentDuration(selectedContact?.duration_min || 30);
+  setShowDateEdit(true);
 };
 
 
@@ -1162,16 +1212,25 @@ const handleDeleteActivity = async (activityId: string) => {
   <div className="space-y-2">
    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
     <Calendar className="h-4 w-4 text-blue-400" />Lịch hẹn sắp tới
+    
     <button
-      className="ml-1 text-blue-600 hover:underline text-xs"
-      title="Cập nhật lịch hẹn"
-      onClick={() => {
-        setAppointmentDate(selectedContact.next_appointment_at || "");
-        setShowDateEdit(true);
-      }}
-    >
-      <Edit className="h-3 w-3" />
-    </button>
+  className="ml-1 text-blue-600 hover:underline text-xs"
+  title="Cập nhật lịch hẹn"
+  onClick={async () => {
+    let iso = "";
+    if (selectedContact?.next_appointment_at) {
+      iso = toDatetimeLocal(selectedContact.next_appointment_at);
+    }
+    const duration = await fetchNextAppointmentDuration(selectedContact?.id, selectedContact?.next_appointment_at);
+    setAppointmentDate(iso);
+    setAppointmentDuration(duration);
+    setShowDateEdit(true);
+  }}
+>
+  <Edit className="h-3 w-3" />
+</button>
+
+
   </Label>
   <div className="flex items-center gap-2">
     <span>
@@ -1605,7 +1664,7 @@ const handleDeleteActivity = async (activityId: string) => {
       </Dialog>
 
       {/* --- Edit Lịch hẹn sắp tới --- */}
-<Dialog open={showDateEdit} onOpenChange={setShowDateEdit}>
+ <Dialog open={showDateEdit} onOpenChange={setShowDateEdit}>
   <DialogContent>
     <DialogHeader>
       <DialogTitle>Cập nhật lịch hẹn sắp tới</DialogTitle>
@@ -1618,21 +1677,27 @@ const handleDeleteActivity = async (activityId: string) => {
         value={appointmentDate}
         onChange={e => setAppointmentDate(e.target.value)}
       />
+      <Label htmlFor="edit-appointment-duration">Thời lượng (phút)</Label>
+      <Input
+        id="edit-appointment-duration"
+        type="number"
+        min={1}
+        max={480}
+        value={appointmentDuration}
+        onChange={e => setAppointmentDuration(Number(e.target.value))}
+      />
     </div>
     <DialogFooter>
-      <Button
-        variant="outline"
-        onClick={() => setShowDateEdit(false)}
-      >Hủy</Button>
+      <Button variant="outline" onClick={() => setShowDateEdit(false)}>Hủy</Button>
       <Button
         onClick={handleSaveAppointmentDate}
         disabled={!appointmentDate}
-      >
-        Lưu
-      </Button>
+      >Lưu</Button>
     </DialogFooter>
   </DialogContent>
 </Dialog>
+
+     
 
 
       {/* --- Edit Dialog Contact (giống Add nhưng là update) --- */}
