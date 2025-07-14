@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react"
 import { useAuth } from "@/components/auth-provider"
 import { supabase } from "@/lib/supabaseClient"
-
+import { toZonedTime } from 'date-fns-tz';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -308,20 +308,62 @@ const handleAddContact = async () => {
 
 
 const handleSaveAppointmentDate = async () => {
-  if (!selectedContact) return;
+  if (!selectedContact || !appointmentDate) return;
+
+  // Chuyển thành UTC ISO string (chuẩn)
+  const utcISOString = new Date(appointmentDate).toISOString();
+
+  // 1. Kiểm tra trùng lịch của chính sales đó (user)
+  const { data: conflictAppointments, error: checkError } = await supabase
+    .from("appointments")
+    .select("id")
+    .eq("scheduled_at", utcISOString)
+    .eq("created_by", user?.id); // user.id là sales hiện tại
+
+  if (checkError) {
+    toast.error("Lỗi kiểm tra trùng lịch: " + checkError.message);
+    return;
+  }
+
+  if (conflictAppointments && conflictAppointments.length > 0) {
+    toast.error("Bạn đã có lịch hẹn khác vào thời điểm này. Vui lòng chọn thời gian khác!");
+    return;
+  }
+
+  // 2. Update trường next_appointment_at cho contact
   const { error } = await supabase
     .from("contacts")
-    .update({ next_appointment_at: appointmentDate })
+    .update({ next_appointment_at: utcISOString })
     .eq("id", selectedContact.id);
 
   if (!error) {
     setSelectedContact({
       ...selectedContact,
-      next_appointment_at: appointmentDate,
+      next_appointment_at: utcISOString,
     });
     setShowDateEdit(false);
+
+    // 3. Insert vào bảng appointments
+    const { error: insertError } = await supabase.from("appointments").insert([{
+      contact_id: selectedContact.id,
+      title: `Lịch hẹn với ${selectedContact.name}`,
+      type: "meeting",
+      scheduled_at: utcISOString,
+      status: "scheduled",
+      created_by: user?.id,
+    }]);
+
+    if (insertError) {
+      toast.error("Lỗi khi thêm vào appointments: " + insertError.message);
+    } else {
+      toast.success("Đã lưu và thêm lịch hẹn vào Calendar!");
+    }
+  } else {
+    toast.error("Lỗi khi lưu lịch hẹn: " + error.message);
   }
 };
+
+
 
   const handleViewContact = (contact: any) => {
     setSelectedContact(contact)

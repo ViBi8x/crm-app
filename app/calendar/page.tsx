@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
+
+import { toZonedTime } from 'date-fns-tz';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,6 +22,8 @@ import {
 } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CalendarDays, Users, Phone, Video, Plus, ChevronLeft, ChevronRight } from "lucide-react"
+
+
 import {
   format,
   startOfMonth,
@@ -33,6 +38,8 @@ import {
   subMonths,
   parseISO,
 } from "date-fns"
+
+const timeZone = "Asia/Ho_Chi_Minh";
 
 const appointmentTypes = [
   { value: "meeting", label: "Meeting", vietnamese: "Cuộc họp" },
@@ -96,21 +103,20 @@ export default function CalendarPage() {
 }, [appointments]);
 
   
-  const fetchAppointments = async () => {
-    setLoading(true)
-    // Get range for current month
-    const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)
-    const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59)
-    const { data, error } = await supabase
-      .from("appointments")
-      .select("*")
-      .gte("scheduled_at", start.toISOString())
-      .lte("scheduled_at", end.toISOString())
-      .order("scheduled_at", { ascending: true })
-
-    if (!error && data) setAppointments(data)
-    setLoading(false)
+const fetchAppointments = async () => {
+  setLoading(true);
+  // Lấy tất cả appointments (hoặc thêm điều kiện chỉ lấy appointments năm nay nếu cần)
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("*")
+    .order("scheduled_at", { ascending: true });
+  if (!error && data) {
+    console.log("Supabase data raw:", data);
+    setAppointments(data);
   }
+  setLoading(false);
+};
+
 
   // Generate calendar grid
   const monthStart = startOfMonth(currentMonth)
@@ -160,44 +166,78 @@ export default function CalendarPage() {
     const dd = String(selectedDate.getDate()).padStart(2, '0')
     const time = newAppointment.time // "09:00"
     const scheduled_at = `${yyyy}-${mm}-${dd}T${time}:00+07:00` // adjust timezone if needed
+    const duration_min = Number(newAppointment.duration_min) || 30
 
-    // attendees là array (nếu cột trong DB là text[])
-    const attendeesArray = newAppointment.attendees
-      ? newAppointment.attendees.split(",").map((s) => s.trim())
-      : []
+  // Check trùng lịch:
+  // Lấy tất cả lịch của user (hoặc tất cả nếu sales xem full)
+  const { data: appointmentsData, error: appointmentsError } = await supabase
+    .from("appointments")
+    .select("scheduled_at, duration_min, created_by")
+    .eq("created_by", userId)
 
-    const { error } = await supabase.from("appointments").insert([{
-      title: newAppointment.title,
-      type: newAppointment.type,
-      scheduled_at,
-      note: newAppointment.description || newAppointment.location || "",
-      attendees: attendeesArray,
-      created_by: userId,
-    }])
-
-    if (!error) {
-      await fetchAppointments()
-      setIsDialogOpen(false)
-      setSelectedDate(null)
-    } else {
-      alert("Lỗi khi tạo appointment: " + error.message)
-    }
+  if (appointmentsError) {
+    alert("Lỗi khi kiểm tra trùng lịch: " + appointmentsError.message)
     setLoading(false)
+    return
   }
 
-  // Chuyển đổi appointment từ Supabase sang format cho calendar grid
-  const getAppointmentsForDate = (date: Date) => {
-  const filtered = appointments.filter((apt) => {
-    const aptDate = apt.scheduled_at ? parseISO(apt.scheduled_at) : null
-    return aptDate && isSameDay(aptDate, date)
-  });
-  console.log("Date: ", date, "Filtered: ", filtered);
-  return filtered.map((apt) => ({
-    ...apt,
-    time: apt.scheduled_at ? format(parseISO(apt.scheduled_at), "HH:mm") : "",
-    description: apt.note || ""
-  }))
+  // Check overlap
+  const newStart = new Date(scheduled_at)
+  const newEnd = new Date(newStart.getTime() + duration_min * 60 * 1000)
+  const isConflict = appointmentsData.some((apt) => {
+    const existStart = new Date(apt.scheduled_at)
+    const existDuration = Number(apt.duration_min) || 30
+    const existEnd = new Date(existStart.getTime() + existDuration * 60 * 1000)
+    // overlap nếu (startA < endB && startB < endA)
+    return (newStart < existEnd) && (existStart < newEnd)
+  })
+
+  if (isConflict) {
+    alert("Bạn đã có lịch hẹn khác bị trùng trong khoảng thời gian này!")
+    setLoading(false)
+    return
+  }
+
+  // attendees là array (nếu cột trong DB là text[])
+  const attendeesArray = newAppointment.attendees
+    ? newAppointment.attendees.split(",").map((s) => s.trim())
+    : []
+
+  const { error } = await supabase.from("appointments").insert([{
+    title: newAppointment.title,
+    type: newAppointment.type,
+    scheduled_at,
+    note: newAppointment.description || newAppointment.location || "",
+    attendees: attendeesArray,
+    created_by: userId,
+    duration_min, // Thêm vào đây!
+  }])
+
+  if (!error) {
+    await fetchAppointments()
+    setIsDialogOpen(false)
+    setSelectedDate(null)
+  } else {
+    alert("Lỗi khi tạo appointment: " + error.message)
+  }
+  setLoading(false)
 }
+
+  // Chuyển đổi appointment từ Supabase sang format cho calendar grid
+  const getAppointmentsForDate = (date) => {
+  return appointments.filter((apt) => {
+    if (!apt.scheduled_at) return false;
+    // Chuyển UTC về đúng giờ Việt Nam
+    const aptDate = toZonedTime(apt.scheduled_at, timeZone);
+    return isSameDay(aptDate, date);
+  }).map((apt) => ({
+    ...apt,
+    time: apt.scheduled_at
+      ? format(toZonedTime(apt.scheduled_at, timeZone), "HH:mm")
+      : "",
+      description: apt.note || ""
+    }));
+  };
 
   // Monthly statistics
   const monthlyAppointments = appointments.filter((apt) => {
@@ -485,6 +525,39 @@ export default function CalendarPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label htmlFor="time">
+                    Time <span className="text-xs text-muted-foreground">/ Thời gian</span>
+                  </Label>
+                  <Input
+                    id="time"
+                    type="time"
+                    value={newAppointment.time}
+                    onChange={(e) => setNewAppointment({ ...newAppointment, time: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="duration">
+                    Duration <span className="text-xs text-muted-foreground">/ Thời lượng (phút)</span>
+                  </Label>
+                  <Input
+                    id="duration"
+                    type="number"
+                    min={1}
+                    max={480}
+                    value={newAppointment.duration_min ?? 30}
+                    onChange={(e) =>
+                      setNewAppointment({
+                        ...newAppointment,
+                        duration_min: Number(e.target.value) || 30,
+                      })
+                    }
+                    placeholder="30"
+                  />
+                </div>
+              </div>
+
+               <div className="space-y-2">
                   <Label htmlFor="type">
                     Type <span className="text-xs text-muted-foreground">/ Loại</span>
                   </Label>
@@ -503,20 +576,8 @@ export default function CalendarPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </div> 
 
-                <div className="space-y-2">
-                  <Label htmlFor="time">
-                    Time <span className="text-xs text-muted-foreground">/ Thời gian</span>
-                  </Label>
-                  <Input
-                    id="time"
-                    type="time"
-                    value={newAppointment.time}
-                    onChange={(e) => setNewAppointment({ ...newAppointment, time: e.target.value })}
-                  />
-                </div>
-              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="location">
