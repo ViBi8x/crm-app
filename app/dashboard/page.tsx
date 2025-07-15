@@ -47,11 +47,11 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (userRole) {
+    if (userRole && user) {
       fetchDashboard()
     }
     // eslint-disable-next-line
-  }, [userRole])
+  }, [userRole, user])
 
   async function fetchDashboard() {
     // ---- STATS ----
@@ -108,22 +108,31 @@ export default function Dashboard() {
     // ---- RECENT ACTIVITY ----
     let activityQuery = supabase
       .from("contact_history")
-      .select("id, contact_id, type, note, action_time, user_id, created_by, contact:contacts(name)")
+      .select(`
+        id,
+        contact_id,
+        type,
+        note,
+        action_time,
+        user_id,
+        contact:contacts(name),
+        user:profiles(full_name)
+      `)
       .order("action_time", { ascending: false })
-      .limit(5)
+      .limit(10) // lấy 10 activity gần nhất
 
     if (userRole === "sales" && user) {
-      activityQuery = activityQuery.eq("created_by", user.id)
+      activityQuery = activityQuery.eq("user_id", user.id)
     } else if (userRole === "manager" && user) {
-      // Lấy id của các sales mình quản lý
+      // Lấy id của các sales mà manager này quản lý
       const { data: salesList } = await supabase
         .from("profiles")
         .select("id")
         .eq("manager_id", user.id)
       const salesIds = salesList?.map((u) => u.id) || []
-      activityQuery = activityQuery.in("created_by", [user.id, ...salesIds])
+      activityQuery = activityQuery.in("user_id", [user.id, ...salesIds])
     }
-    // admin thì không filter
+    // admin thì không filter gì
 
     const { data: activityRaw } = await activityQuery
     setRecentActivities(activityRaw || [])
@@ -250,6 +259,9 @@ export default function Dashboard() {
                         : activity.type === "task"
                         ? "Nhiệm vụ"
                         : "Hoạt động"}
+                      <span className="ml-2 text-xs text-gray-500">
+                        {activity.user?.full_name ? `— ${activity.user.full_name}` : ""}
+                      </span>
                     </p>
                     <p className="text-xs text-muted-foreground">{activity.note}</p>
                     <p className="text-xs text-blue-600">{activity.contact?.name || ""}</p>

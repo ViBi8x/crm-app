@@ -750,23 +750,44 @@ const handleSaveAssignedTo = async (newAssignedTo) => {
 
   // ----------------- ACTIVITY -----------------
   const handleAddActivity = async () => {
-  if (!selectedContact) return
-  // Tùy chọn: nếu có file, upload lên Supabase storage và lấy URL
-  // Ở đây để attachment_url = null, bạn có thể mở rộng sau!
-  const insertData = {
+  if (!selectedContact) return;
+  if (!user?.id) {
+    toast.error("Không xác định được user!");
+    return;
+  }
+
+  // Tạo object insert cho các trường cơ bản
+  const insertData: any = {
     contact_id: selectedContact.id,
+    user_id: user.id,  // BẮT BUỘC PHẢI LƯU!
     type: newActivity.type,
     note: newActivity.note,
     action_time: new Date(`${newActivity.date}T${newActivity.time}`),
-    attachment_url: null, // Bổ sung nếu bạn cần
+    attachment_url: null, // Có thể xử lý upload sau
+  };
+
+  // Nếu có duration cho call/meeting
+  if ((newActivity.type === "call" || newActivity.type === "meeting") && newActivity.duration) {
+    insertData.duration_min = Number(newActivity.duration);
   }
-  const { error } = await supabase.from('contact_history').insert([insertData])
+
+  // Nếu có location
+  if (newActivity.location) {
+    insertData.location = newActivity.location;
+  }
+
+  // Nếu là task và có dueDate
+  if (newActivity.type === "task" && newActivity.dueDate) {
+    insertData.due_date = newActivity.dueDate;
+  }
+
+  const { error } = await supabase.from('contact_history').insert([insertData]);
   if (error) {
-    toast.error("Lỗi thêm hoạt động: " + error.message)
-    return
+    toast.error("Lỗi thêm hoạt động: " + error.message);
+    return;
   }
-  toast.success("Đã thêm hoạt động")
-  setIsAddActivityDialogOpen(false)
+  toast.success("Đã thêm hoạt động");
+  setIsAddActivityDialogOpen(false);
   setNewActivity({
     type: "call",
     note: "",
@@ -776,33 +797,31 @@ const handleSaveAssignedTo = async (newAssignedTo) => {
     location: "",
     dueDate: "",
     file: null,
-  })
-  fetchContactActivities(selectedContact.id)
+  });
+  fetchContactActivities(selectedContact.id);
 
   // --- GHI LOG ACTIVITY ---
-  if (user?.id) {
-    await fetch("/api/activity/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: user.id,
-        action_type: "contact_activity_added",
-        target_id: selectedContact.id,
-        target_type: "contact",
-        detail: {
-          contactName: selectedContact.name,
-          activityType: newActivity.type,
-          note: newActivity.note,
-          action_time: insertData.action_time,
-          duration: insertData.duration,
-          location: insertData.location,
-          userName: user.full_name,
-        }
-      })
-    });
-  }
+  await fetch("/api/activity/log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: user.id,
+      action_type: "contact_activity_added",
+      target_id: selectedContact.id,
+      target_type: "contact",
+      detail: {
+        contactName: selectedContact.name,
+        activityType: newActivity.type,
+        note: newActivity.note,
+        action_time: insertData.action_time,
+        duration: insertData.duration_min,
+        location: insertData.location,
+        userName: user.full_name,
+      }
+    })
+  });
+};
 
-}
 
 const handleDeleteActivity = async (activityId: string) => {
   const { error } = await supabase.from('contact_history').delete().eq('id', activityId)
@@ -1132,6 +1151,18 @@ const handleDeleteActivity = async (activityId: string) => {
                 <div className="flex items-center gap-2">
                   <Badge className={getLifeStageColor(contact.life_stage)}>{LIFE_STAGE_OPTIONS.find(l => l.value === contact.life_stage)?.label || contact.life_stage}</Badge>
                   
+                  <Badge
+                      className={
+                        contact.assigned_to
+                          ? "bg-green-100 text-green-800"
+                          : "bg-gray-200 text-gray-600"
+                      }
+                    ><UserCheck className="mr-1 h-3 w-3" />
+                      {contact.assigned_to
+                        ? profileOptions.find((p) => p.id === contact.assigned_to)?.full_name || "Đang gán..."
+                        : "Not Assigned"}
+                    </Badge>
+
                   <div className="flex gap-1">
                     <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
                       <Eye className="h-4 w-4" />
