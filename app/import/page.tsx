@@ -1,15 +1,17 @@
+// app/import/page.tsx
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
+import React, { useState } from "react"
+import Papa from "papaparse"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { toast } from "sonner"
 import {
   Dialog,
   DialogContent,
@@ -18,130 +20,118 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+
 import { Upload, Download, FileText, AlertCircle, CheckCircle, X } from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [previewData, setPreviewData] = useState<any[]>([])
-  const [validationErrors, setValidationErrors] = useState<any[]>([])
   const [importStatus, setImportStatus] = useState<"idle" | "preview" | "importing" | "success" | "error">("idle")
 
-  // Mock CSV template data
   const csvTemplate = [
-    { field: "name", required: true, description: "Full name / Họ và tên" },
-    { field: "email", required: true, description: "Email address / Địa chỉ email" },
-    { field: "phone", required: false, description: "Phone number / Số điện thoại" },
-    { field: "zalo", required: false, description: "Zalo ID / ID Zalo" },
-    { field: "company", required: false, description: "Company name / Tên công ty" },
-    { field: "company_size", required: false, description: "Company size / Quy mô công ty" },
-    { field: "industry", required: false, description: "Industry / Ngành nghề" },
-    { field: "data_source", required: false, description: "Data source / Nguồn dữ liệu" },
-    { field: "notes", required: false, description: "Notes / Ghi chú" },
-  ]
-
-  // Mock preview data
-  const mockPreviewData = [
-    {
-      name: "John Smith",
-      email: "john@company.com",
-      phone: "+1 234 567 8900",
-      zalo: "john_zalo",
-      company: "Tech Corp",
-      company_size: "50-100",
-      industry: "Technology",
-      data_source: "Website",
-      notes: "Interested in enterprise solution",
-      status: "valid",
-    },
-    {
-      name: "Maria Garcia",
-      email: "invalid-email",
-      phone: "+1 234 567 8901",
-      zalo: "maria_zalo",
-      company: "StartupIO",
-      company_size: "10-50",
-      industry: "Software",
-      data_source: "LinkedIn",
-      notes: "Budget approved",
-      status: "error",
-      errors: ["Invalid email format"],
-    },
-    {
-      name: "",
-      email: "david@manufacturing.com",
-      phone: "+1 234 567 8902",
-      zalo: "david_chen",
-      company: "Manufacturing Plus",
-      company_size: "100-500",
-      industry: "Manufacturing",
-      data_source: "Trade Show",
-      notes: "Existing customer",
-      status: "error",
-      errors: ["Name is required"],
-    },
+    { field: "name", required: true, description: "Họ và tên" },
+    { field: "email", required: true, description: "Email" },
+    { field: "phone", required: false, description: "Số điện thoại" },
+    { field: "zalo", required: false, description: "Zalo" },
+    { field: "company", required: false, description: "Tên công ty" },
+    { field: "company_size", required: false, description: "Quy mô công ty" },
+    { field: "industry", required: false, description: "Ngành nghề" },
+    { field: "data_source", required: false, description: "Nguồn dữ liệu" },
+    { field: "life_stage", required: false, description: "Giai đoạn" },
+    { field: "assigned_to", required: false, description: "ID người phụ trách" },
+    { field: "next_appointment_at", required: false, description: "Ngày hẹn tiếp theo (ISO)" },
+    { field: "notes", required: false, description: "Ghi chú" },
+    { field: "tags", required: false, description: "Tags (cách nhau bởi dấu phẩy)" },
+    { field: "created_by", required: false, description: "ID người tạo" },
+    { field: "address", required: false, description: "Địa chỉ" },
+    { field: "position", required: false, description: "Chức vụ" },
   ]
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0]
-    if (selectedFile) {
-      setFile(selectedFile)
-      // Simulate file processing
-      setIsUploading(true)
-      setUploadProgress(0)
+    if (!selectedFile) return
 
-      const interval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval)
-            setIsUploading(false)
-            setImportStatus("preview")
-            setPreviewData(mockPreviewData)
-            return 100
-          }
-          return prev + 10
+    setFile(selectedFile)
+    setIsUploading(true)
+    setUploadProgress(0)
+
+    Papa.parse(selectedFile, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const rows = results.data as any[]
+        const validated = rows.map((row) => {
+          const errors = []
+          if (!row.name) errors.push("Name is required")
+          if (!row.email || !/\S+@\S+\.\S+/.test(row.email)) errors.push("Invalid email")
+          return { ...row, status: errors.length === 0 ? "valid" : "error", errors }
         })
-      }, 200)
-    }
+        setPreviewData(validated)
+        setIsUploading(false)
+        setUploadProgress(100)
+        setImportStatus("preview")
+      },
+    })
   }
 
-  const downloadTemplate = () => {
-    // Create CSV content
-    const headers = csvTemplate.map((field) => field.field).join(",")
-    const sampleRow =
-      "John Doe,john@example.com,+1234567890,john_zalo,Example Corp,50-100,Technology,Website,Sample notes"
-    const csvContent = `${headers}\n${sampleRow}`
+const [insertedCount, setInsertedCount] = useState(0)
+const [duplicateContacts, setDuplicateContacts] = useState<any[]>([])
 
-    // Create and download file
-    const blob = new Blob([csvContent], { type: "text/csv" })
-    const url = window.URL.createObjectURL(blob)
+
+const handleImport = async () => {
+  setImportStatus("importing")
+  setUploadProgress(0)
+
+  try {
+    const res = await fetch("/api/import-contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contacts: previewData.filter((c) => c.status === "valid"),
+      }),
+    })
+
+    const result = await res.json()
+
+    if (res.ok && result.success) {
+      const inserted = result.inserted || 0
+      const duplicates = result.duplicates || []
+
+      setInsertedCount(inserted)
+      setDuplicateContacts(duplicates)
+      setImportStatus("success")
+
+      toast.success(`Import hoàn tất`)
+    } else {
+      setImportStatus("error")
+      toast.error(`❌ Lỗi khi import contacts: ${result.error || "Không rõ nguyên nhân"}`)
+    }
+
+  } catch (err) {
+    setImportStatus("error")
+    toast.error("❌ Đã xảy ra lỗi hệ thống")
+  }
+}
+
+
+
+
+  const downloadTemplate = () => {
+    const headers = csvTemplate.map((f) => f.field).join(",")
+    const sample = "John Doe,john@example.com,+1234567890,john_zalo,Example Corp,50-100,Technology,Website,Lead,user-uuid-123,2025-07-20T10:00:00+07:00,Ghi chú mẫu,tag1,tag2,creator-uuid-456,123 Đường ABC, Trưởng phòng"
+    const blob = new Blob([`${headers}\n${sample}`], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
     a.download = "contacts_template.csv"
     a.click()
-    window.URL.revokeObjectURL(url)
+    URL.revokeObjectURL(url)
   }
 
-  const handleImport = () => {
-    setImportStatus("importing")
-    setUploadProgress(0)
-
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          setImportStatus("success")
-          return 100
-        }
-        return prev + 15
-      })
-    }, 300)
-  }
-
-  const validContacts = previewData.filter((contact) => contact.status === "valid")
-  const errorContacts = previewData.filter((contact) => contact.status === "error")
+  const validContacts = previewData.filter((c) => c.status === "valid")
+  const errorContacts = previewData.filter((c) => c.status === "error")
 
   return (
     <div className="space-y-6">
@@ -406,44 +396,51 @@ export default function ImportPage() {
 
       {/* Success Message */}
       {importStatus === "success" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-green-600">Import Successful!</CardTitle>
-            <CardDescription>
-              Your contacts have been imported successfully.
-              <br />
-              Danh bạ của bạn đã được nhập thành công.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 p-4 bg-green-50 rounded-lg">
-                <CheckCircle className="h-6 w-6 text-green-600" />
-                <div>
-                  <p className="font-medium">{validContacts.length} contacts imported successfully</p>
-                  <p className="text-sm text-muted-foreground">
-                    {validContacts.length} liên hệ đã được nhập thành công
-                  </p>
-                </div>
-              </div>
+  <Card>
+    <CardHeader>
+      <CardTitle className="text-green-600">Kết quả import danh bạ</CardTitle>
+      <CardDescription>
+        Tổng kết quá trình import
+        <br />
+        {insertedCount > 0 ? `${insertedCount} liên hệ được thêm thành công.` : ""}
+        {duplicateContacts.length > 0 ? ` ${duplicateContacts.length} liên hệ bị trùng và không được thêm.` : ""}
+      </CardDescription>
+    </CardHeader>
+    <CardContent>
+      <div className="space-y-4">
+        {/* Danh sách liên hệ trùng nếu có */}
+        {duplicateContacts.length > 0 && (
+          <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+            <p className="text-yellow-800 font-medium mb-2">Liên hệ bị trùng:</p>
+            <ul className="text-sm text-yellow-700 list-disc list-inside space-y-1">
+              {duplicateContacts.map((c, i) => (
+                <li key={i}>{c.name} ({c.email || c.phone})</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
-              <div className="flex gap-2">
-                <Button onClick={() => (window.location.href = "/contacts")}>View Contacts / Xem danh bạ</Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setImportStatus("idle")
-                    setFile(null)
-                    setPreviewData([])
-                    setUploadProgress(0)
-                  }}
-                >
-                  Import More / Nhập thêm
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="flex gap-2">
+          <Button onClick={() => (window.location.href = "/contacts")}>Xem danh bạ</Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setImportStatus("idle")
+              setInsertedCount(0)
+              setDuplicateContacts([])
+              setFile(null)
+              setPreviewData([])
+              setUploadProgress(0)
+            }}
+          >
+            Nhập thêm
+          </Button>
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+
+
       )}
     </div>
   )

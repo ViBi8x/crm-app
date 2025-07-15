@@ -266,13 +266,49 @@ const fetchContactActivities = async (contactId: string) => {
 
   // ------------- CRUD HANDLERS --------------
 const handleAddContact = async () => {
+  // --- 1. Kiểm tra trùng lặp email và số điện thoại ---
+  const { email, phone } = newContact;
+
+  // Có thể bắt buộc nhập ít nhất 1 trường
+  if (!email && !phone) {
+    toast.error("Bạn phải nhập ít nhất email hoặc số điện thoại!");
+    return;
+  }
+
+  // Kiểm tra trùng lặp trong Supabase
+  let orQuery = [];
+  if (email) orQuery.push(`email.eq.${email}`);
+  if (phone) orQuery.push(`phone.eq.${phone}`);
+  if (orQuery.length > 0) {
+    const { data: dupContacts, error: dupError } = await supabase
+      .from("contacts")
+      .select("id, name, email, phone")
+      .or(orQuery.join(","));
+
+    if (dupError) {
+      toast.error("Lỗi kiểm tra trùng lặp: " + dupError.message);
+      return;
+    }
+
+    if (dupContacts && dupContacts.length > 0) {
+      // Có thể custom message hiển thị rõ contact trùng
+      let msg = "Liên hệ với";
+      msg += email ? ` email "${email}"` : "";
+      msg += email && phone ? " hoặc" : "";
+      msg += phone ? ` số điện thoại "${phone}"` : "";
+      msg += " đã tồn tại trong hệ thống!";
+      toast.error(msg);
+      return;
+    }
+  }
+
+  // --- 2. Nếu không trùng, tiếp tục thêm contact ---
   const insertData = {
     ...newContact,
     assigned_to: newContact.assigned_to === "unassigned" ? null : newContact.assigned_to,
     tags: newContact.tags,
   };
 
-  // CHỖ NÀY THÊM .select().single()
   const { data, error } = await supabase
     .from("contacts")
     .insert([insertData])
@@ -298,10 +334,7 @@ const handleAddContact = async () => {
     assigned_to: user?.id || "", // reset về mặc định là user hiện tại
     position: "",
     address: "",
-    next_appointment_at:
-      !newContact.next_appointment_at || newContact.next_appointment_at === "" || newContact.next_appointment_at === "null"
-        ? null
-        : newContact.next_appointment_at, // luôn trả về null thực nếu không nhập
+    next_appointment_at: null,
     tags: [],
     notes: "",
   });
@@ -325,8 +358,7 @@ const handleAddContact = async () => {
       })
     });
   }
-}
-
+};
 
 
 
@@ -428,13 +460,44 @@ const handleEditNextAppointment = () => {
   }
 
 
+// CẬP NHẬT CONTACT
   const handleUpdateContact = async () => {
   if (!selectedContact) return;
 
-  const oldData = selectedContact;
-  const newData = { ...selectedContact, ...newContact };
+  const { email, phone } = newContact;
 
+  // Kiểm tra trùng lặp với các contact khác (không phải chính nó)
+  let orQuery = [];
+  if (email) orQuery.push(`email.eq.${email}`);
+  if (phone) orQuery.push(`phone.eq.${phone}`);
+  if (orQuery.length > 0) {
+    const { data: dupContacts, error: dupError } = await supabase
+      .from("contacts")
+      .select("id, name, email, phone")
+      .or(orQuery.join(","));
+
+    if (dupError) {
+      toast.error("Lỗi kiểm tra trùng lặp: " + dupError.message);
+      return;
+    }
+
+    // Lọc bỏ chính contact đang update (nếu trùng id)
+    const filteredDup = (dupContacts || []).filter(c => c.id !== selectedContact.id);
+    if (filteredDup.length > 0) {
+      let msg = "Liên hệ với";
+      msg += email ? ` email "${email}"` : "";
+      msg += email && phone ? " hoặc" : "";
+      msg += phone ? ` số điện thoại "${phone}"` : "";
+      msg += " đã tồn tại trong hệ thống!";
+      toast.error(msg);
+      return;
+    }
+  }
+
+  // --- Nếu không trùng, tiếp tục update contact ---
+  const oldData = selectedContact;
   const updateData = { ...newContact, tags: newContact.tags };
+
   const { error } = await supabase
     .from("contacts")
     .update(updateData)
@@ -461,15 +524,59 @@ const handleEditNextAppointment = () => {
         target_type: "contact",
         detail: {
           contactName: oldData.name,
-          fieldsChanged: Object.keys(newData).filter(k => newData[k] !== oldData[k]),
+          fieldsChanged: Object.keys(newContact).filter(k => newContact[k] !== oldData[k]),
           oldData,
-          newData,
+          newData: newContact,
           userName: user.full_name,
         }
       })
     });
   }
 };
+
+
+//   const handleUpdateContact = async () => {
+//   if (!selectedContact) return;
+
+//   const oldData = selectedContact;
+//   const newData = { ...selectedContact, ...newContact };
+
+//   const updateData = { ...newContact, tags: newContact.tags };
+//   const { error } = await supabase
+//     .from("contacts")
+//     .update(updateData)
+//     .eq("id", selectedContact.id);
+
+//   if (error) {
+//     toast.error("Lỗi cập nhật liên hệ: " + error.message);
+//     return;
+//   }
+
+//   toast.success("Cập nhật liên hệ thành công");
+//   setIsEditDialogOpen(false);
+//   fetchContacts();
+
+//   // --- GHI LOG ACTIVITY ---
+//   if (user?.id) {
+//     await fetch("/api/activity/log", {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({
+//         user_id: user.id,
+//         action_type: "contact_updated",
+//         target_id: selectedContact.id,
+//         target_type: "contact",
+//         detail: {
+//           contactName: oldData.name,
+//           fieldsChanged: Object.keys(newData).filter(k => newData[k] !== oldData[k]),
+//           oldData,
+//           newData,
+//           userName: user.full_name,
+//         }
+//       })
+//     });
+//   }
+// };
 
 
 

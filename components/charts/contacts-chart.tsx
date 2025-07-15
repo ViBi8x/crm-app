@@ -2,19 +2,41 @@
 
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts"
 
-const data = [
-  { name: "Subscriber / Người đăng ký", value: 1200, color: "#3b82f6" },
-  { name: "Lead / Khách tiềm năng", value: 800, color: "#10b981" },
-  { name: "Opportunity / Cơ hội", value: 600, color: "#f59e0b" },
-  { name: "Customer / Khách hàng", value: 247, color: "#ef4444" },
-]
+const COLORS: Record<string, string> = {
+  Subscriber: "#3b82f6",
+  Lead: "#10b981",
+  Opportunity: "#f59e0b",
+  Customer: "#ef4444",
+  Unknown: "#9ca3af",
+}
 
-export function ContactsChart() {
+interface ContactsChartProps {
+  data: {
+    name: string
+    value: number
+  }[]
+}
+
+export function ContactsChart({ data }: ContactsChartProps) {
+  const formattedData = data.map((item) => ({
+    ...item,
+    color: COLORS[item.name as keyof typeof COLORS] || "#ccc",
+    name: `${item.name} / ${getVietnameseLabel(item.name)}`,
+  }))
+
   return (
     <ResponsiveContainer width="100%" height={300}>
       <PieChart>
-        <Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
-          {data.map((entry, index) => (
+        <Pie
+          data={formattedData}
+          cx="50%"
+          cy="50%"
+          innerRadius={60}
+          outerRadius={100}
+          paddingAngle={5}
+          dataKey="value"
+        >
+          {formattedData.map((entry, index) => (
             <Cell key={`cell-${index}`} fill={entry.color} />
           ))}
         </Pie>
@@ -23,4 +45,19 @@ export function ContactsChart() {
       </PieChart>
     </ResponsiveContainer>
   )
+}
+
+function getVietnameseLabel(lifeStage: string): string {
+  switch (lifeStage) {
+    case "Subscriber":
+      return "Người đăng ký"
+    case "Lead":
+      return "Khách tiềm năng"
+    case "Opportunity":
+      return "Cơ hội"
+    case "Customer":
+      return "Khách hàng"
+    default:
+      return "Không xác định"
+  }
 }
