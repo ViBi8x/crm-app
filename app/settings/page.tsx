@@ -1,14 +1,17 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { User, Mail, Calendar, BarChart3, LogOut, Key, Camera } from "lucide-react"
+import { useEffect, useState, useRef } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/components/auth-provider";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { User, Mail, Calendar, BarChart3, LogOut, Key, Camera } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -17,60 +20,254 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog"
+} from "@/components/ui/dialog";
 
-// Mock user data
-const currentUser = {
-  id: 1,
-  name: "John Doe",
-  email: "john@company.com",
-  phone: "+1 234 567 8900",
-  role: "Admin",
-  avatar: "/placeholder.svg?height=80&width=80",
-  joinDate: "2024-01-01",
-  lastLogin: "2024-01-15 09:30",
-  stats: {
-    totalContacts: 1247,
-    contactsThisMonth: 127,
-    appointmentsThisWeek: 8,
-    conversionRate: 24.8,
-  },
-}
+// Hàm lấy ký tự viết tắt cho Avatar
+const getInitials = (name?: string) =>
+  name
+    ? name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+    : "";
 
 export default function SettingsPage() {
-  const [isEditingProfile, setIsEditingProfile] = useState(false)
-  const [isChangingPassword, setIsChangingPassword] = useState(false)
-  const [formData, setFormData] = useState({
-    name: currentUser.name,
-    email: currentUser.email,
-    phone: currentUser.phone,
-  })
+  const { user, logout } = useAuth(); // lấy user từ Auth context
+  const [profile, setProfile] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Form states
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [formData, setFormData] = useState({ name: "", email: "", phone: "" });
+
+  // Password states
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordData, setPasswordData] = useState({
     currentPassword: "",
     newPassword: "",
     confirmPassword: "",
-  })
+  });
 
-  const handleProfileUpdate = () => {
-    // In a real app, this would update the backend
-    console.log("Updating profile:", formData)
-    setIsEditingProfile(false)
-  }
+  // Avatar
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePasswordChange = () => {
-    // In a real app, this would update the backend
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
-      alert("Passwords do not match / Mật khẩu không khớp")
-      return
+  // Stats
+  const [stats, setStats] = useState({
+    totalContacts: 0,
+    contactsThisMonth: 0,
+    appointmentsThisWeek: 0,
+    conversionRate: 0,
+  });
+
+  // ===== Lấy dữ liệu thực tế
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchProfile = async () => {
+      setIsLoading(true);
+      const { data: profileData, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+      if (error) {
+        toast.error("Không lấy được thông tin profile!");
+        setIsLoading(false);
+        return;
+      }
+      setProfile(profileData);
+      setFormData({
+        name: profileData.full_name ?? "",
+        email: profileData.email ?? user.email ?? "",
+        phone: profileData.phone ?? "",
+      });
+      setIsLoading(false);
+    };
+
+    fetchProfile();
+  }, [user]);
+
+  // Lấy thống kê
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchStats = async () => {
+      // 1. Tổng liên hệ
+      const { count: totalContacts } = await supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("created_by", user.id);
+
+      // 2. Liên hệ trong tháng này
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const { count: contactsThisMonth } = await supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("created_by", user.id)
+        .gte("created_at", startOfMonth.toISOString());
+
+      // 3. Cuộc hẹn tuần này
+      const now2 = new Date();
+      const firstDayOfWeek = new Date(now2.setDate(now2.getDate() - now2.getDay()));
+      firstDayOfWeek.setHours(0, 0, 0, 0);
+      const { count: appointmentsThisWeek } = await supabase
+        .from("appointments")
+        .select("*", { count: "exact", head: true })
+        .eq("created_by", user.id)
+        .gte("created_at", firstDayOfWeek.toISOString());
+
+      // 4. Tỷ lệ chuyển đổi (contacts đã trở thành Customer)
+      const { count: convertedContacts } = await supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("created_by", user.id)
+        .eq("life_stage", "Customer");
+
+      setStats({
+        totalContacts: totalContacts || 0,
+        contactsThisMonth: contactsThisMonth || 0,
+        appointmentsThisWeek: appointmentsThisWeek || 0,
+        conversionRate: totalContacts
+          ? Math.round(((convertedContacts || 0) / totalContacts) * 1000) / 10
+          : 0,
+      });
+    };
+
+    fetchStats();
+  }, [user]);
+
+  // Hoạt động tài khoản
+  const joinDate = profile?.created_at?.split("T")[0] || "";
+  const role = profile?.role || "user";
+
+  // ==== Sửa thông tin cá nhân
+  const handleProfileUpdate = async () => {
+    if (!profile) return;
+    setIsLoading(true);
+
+    const updates = {
+      full_name: formData.name,
+      phone: formData.phone,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from("profiles")
+      .update(updates)
+      .eq("id", user.id);
+
+    setIsLoading(false);
+
+    if (error) {
+      console.log("Supabase update error:", error);
+      toast.error("Cập nhật thất bại! " + error.message);
+    } else {
+      setProfile({ ...profile, ...updates });
+      setIsEditingProfile(false);
+      toast.success("Đã lưu thay đổi!");
     }
-    console.log("Changing password")
-    setIsChangingPassword(false)
-    setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" })
-  }
+  };
 
-  const handleSignOut = () => {
-    // In a real app, this would sign out the user
-    console.log("Signing out")
+  // ==== Đổi mật khẩu
+  const handlePasswordChange = async () => {
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      toast.error("Mật khẩu không khớp!");
+      return;
+    }
+    setIsLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: passwordData.newPassword });
+    setIsLoading(false);
+    if (error) {
+      toast.error("Đổi mật khẩu thất bại!");
+    } else {
+      setIsChangingPassword(false);
+      setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      toast.success("Đã đổi mật khẩu!");
+    }
+  };
+
+  // ==== Đổi Avatar (avatar_url)
+  const handleAvatarUpload = async (file: File) => {
+    if (!file) {
+      toast.error("Không có file ảnh nào được chọn!");
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      toast.error("Vui lòng chọn ảnh dung lượng tối đa 1Mb!");
+      return;
+    }
+    setIsUploadingAvatar(true);
+
+    try {
+      const ext = file.name.split('.').pop();
+      const fileName = `${user.id}_${Date.now()}.${ext}`;
+      // Upload file lên bucket 'avatars'
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(fileName, file, { upsert: true });
+
+      if (uploadError) {
+        setIsUploadingAvatar(false);
+        toast.error("Upload ảnh thất bại!");
+        console.error("[AvatarUpload] Upload error:", uploadError);
+        return;
+      }
+
+      // Lấy public url
+      const { data: publicUrlData, error: getUrlError } = supabase.storage
+        .from("avatars")
+        .getPublicUrl(fileName);
+
+      if (getUrlError) {
+        setIsUploadingAvatar(false);
+        toast.error("Không lấy được URL ảnh!");
+        console.error("[AvatarUpload] Get public url error:", getUrlError);
+        return;
+      }
+
+      const avatarUrl = publicUrlData?.publicUrl;
+      if (!avatarUrl) {
+        setIsUploadingAvatar(false);
+        toast.error("Không lấy được URL ảnh!");
+        return;
+      }
+
+      // Update vào profile field avatar_url
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: avatarUrl })
+        .eq("id", user.id);
+
+      if (updateError) {
+        toast.error("Lưu ảnh đại diện thất bại!");
+        console.error("[AvatarUpload] Update profile error:", updateError);
+      } else {
+        setProfile((prev) => ({ ...prev, avatar_url: avatarUrl }));
+        toast.success("Đã cập nhật ảnh đại diện!");
+      }
+    } catch (err) {
+      toast.error("Có lỗi xảy ra khi upload!");
+      console.error("[AvatarUpload] Unknown error:", err);
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  // ==== Đăng xuất
+  const handleSignOut = async () => {
+    await logout();
+    // window.location.href = "/login"; // tuỳ ý
+  };
+
+  if (isLoading || !profile) {
+    return (
+      <div className="flex justify-center items-center min-h-[300px]">
+        <span>Đang tải dữ liệu...</span>
+      </div>
+    );
   }
 
   return (
@@ -81,7 +278,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        {/* Profile Information */}
+        {/* Profile + Security */}
         <div className="md:col-span-2 space-y-6">
           <Card>
             <CardHeader>
@@ -94,29 +291,44 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
-                {/* Avatar Section */}
+                {/* Avatar */}
                 <div className="flex items-center gap-4">
                   <Avatar className="h-20 w-20">
-                    <AvatarImage src={currentUser.avatar || "/placeholder.svg"} />
-                    <AvatarFallback>
-                      {currentUser.name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")}
-                    </AvatarFallback>
+                    <AvatarImage src={profile.avatar_url || "/placeholder.svg"} />
+                    <AvatarFallback>{getInitials(profile.full_name)}</AvatarFallback>
                   </Avatar>
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold">{currentUser.name}</h3>
-                    <p className="text-muted-foreground">{currentUser.email}</p>
+                    <h3 className="text-lg font-semibold">{profile.full_name}</h3>
+                    <p className="text-muted-foreground">{profile.email || user.email}</p>
                     <div className="flex gap-2 mt-2">
-                      <Badge className="bg-blue-100 text-blue-800">{currentUser.role}</Badge>
-                      <Badge variant="outline">Member since {currentUser.joinDate}</Badge>
+                      <Badge className="bg-blue-100 text-blue-800">{profile.role || "User"}</Badge>
+                      <Badge variant="outline">Member since {joinDate}</Badge>
                     </div>
                   </div>
-                  <Button variant="outline" size="sm">
-                    <Camera className="mr-2 h-4 w-4" />
-                    Change Photo / Đổi ảnh
-                  </Button>
+                  <div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      ref={fileInputRef}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) await handleAvatarUpload(file);
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isUploadingAvatar}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Camera className="mr-2 h-4 w-4" />
+                      {isUploadingAvatar ? "Đang tải..." : "Đổi ảnh"}
+                    </Button>
+                    <div className="text-xs text-gray-400 mt-1">
+                      Ảnh tối đa 1Mb. Nên dùng ảnh vuông (1:1) để hiển thị đẹp nhất.
+                    </div>
+                  </div>
                 </div>
 
                 <Separator />
@@ -139,8 +351,7 @@ export default function SettingsPage() {
                         id="email"
                         type="email"
                         value={formData.email}
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        disabled={!isEditingProfile}
+                        disabled
                       />
                     </div>
                   </div>
@@ -158,25 +369,25 @@ export default function SettingsPage() {
                 <div className="flex gap-2">
                   {isEditingProfile ? (
                     <>
-                      <Button onClick={handleProfileUpdate}>Save Changes / Lưu thay đổi</Button>
+                      <Button onClick={handleProfileUpdate}>Lưu thay đổi</Button>
                       <Button
                         variant="outline"
                         onClick={() => {
-                          setIsEditingProfile(false)
+                          setIsEditingProfile(false);
                           setFormData({
-                            name: currentUser.name,
-                            email: currentUser.email,
-                            phone: currentUser.phone,
-                          })
+                            name: profile.full_name,
+                            email: profile.email || user.email,
+                            phone: profile.phone || "",
+                          });
                         }}
                       >
-                        Cancel / Hủy
+                        Hủy
                       </Button>
                     </>
                   ) : (
                     <Button onClick={() => setIsEditingProfile(true)}>
                       <User className="mr-2 h-4 w-4" />
-                      Edit Profile / Sửa hồ sơ
+                      Sửa hồ sơ
                     </Button>
                   )}
                 </div>
@@ -187,41 +398,38 @@ export default function SettingsPage() {
           {/* Security Settings */}
           <Card>
             <CardHeader>
-              <CardTitle>Security Settings / Cài đặt bảo mật</CardTitle>
+              <CardTitle>Cài đặt bảo mật</CardTitle>
               <CardDescription>
-                Manage your password and security preferences
-                <br />
                 Quản lý mật khẩu và tùy chọn bảo mật
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
+                {/* Change Password */}
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div className="flex items-center gap-3">
                     <Key className="h-5 w-5 text-muted-foreground" />
                     <div>
-                      <p className="font-medium">Password / Mật khẩu</p>
+                      <p className="font-medium">Mật khẩu</p>
                       <p className="text-sm text-muted-foreground">
-                        Last changed 30 days ago / Thay đổi lần cuối 30 ngày trước
+                        Đổi mật khẩu định kỳ để bảo mật tài khoản
                       </p>
                     </div>
                   </div>
                   <Dialog open={isChangingPassword} onOpenChange={setIsChangingPassword}>
                     <DialogTrigger asChild>
-                      <Button variant="outline">Change Password / Đổi mật khẩu</Button>
+                      <Button variant="outline">Đổi mật khẩu</Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Change Password / Đổi mật khẩu</DialogTitle>
+                        <DialogTitle>Đổi mật khẩu</DialogTitle>
                         <DialogDescription>
-                          Enter your current password and choose a new one
-                          <br />
-                          Nhập mật khẩu hiện tại và chọn mật khẩu mới
+                          Nhập mật khẩu hiện tại và mật khẩu mới
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label htmlFor="current-password">Current Password / Mật khẩu hiện tại</Label>
+                          <Label htmlFor="current-password">Mật khẩu hiện tại</Label>
                           <Input
                             id="current-password"
                             type="password"
@@ -235,7 +443,7 @@ export default function SettingsPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="new-password">New Password / Mật khẩu mới</Label>
+                          <Label htmlFor="new-password">Mật khẩu mới</Label>
                           <Input
                             id="new-password"
                             type="password"
@@ -249,7 +457,7 @@ export default function SettingsPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="confirm-password">Confirm New Password / Xác nhận mật khẩu mới</Label>
+                          <Label htmlFor="confirm-password">Xác nhận mật khẩu mới</Label>
                           <Input
                             id="confirm-password"
                             type="password"
@@ -265,26 +473,27 @@ export default function SettingsPage() {
                       </div>
                       <DialogFooter>
                         <Button variant="outline" onClick={() => setIsChangingPassword(false)}>
-                          Cancel / Hủy
+                          Hủy
                         </Button>
-                        <Button onClick={handlePasswordChange}>Update Password / Cập nhật mật khẩu</Button>
+                        <Button onClick={handlePasswordChange}>Cập nhật mật khẩu</Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
                 </div>
 
+                {/* Sign Out */}
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div className="flex items-center gap-3">
                     <LogOut className="h-5 w-5 text-muted-foreground" />
                     <div>
-                      <p className="font-medium">Sign Out / Đăng xuất</p>
+                      <p className="font-medium">Đăng xuất</p>
                       <p className="text-sm text-muted-foreground">
-                        Sign out from all devices / Đăng xuất khỏi tất cả thiết bị
+                        Đăng xuất khỏi tất cả thiết bị
                       </p>
                     </div>
                   </div>
                   <Button variant="outline" onClick={handleSignOut}>
-                    Sign Out / Đăng xuất
+                    Đăng xuất
                   </Button>
                 </div>
               </div>
@@ -292,12 +501,11 @@ export default function SettingsPage() {
           </Card>
         </div>
 
-        {/* Statistics Sidebar */}
+        {/* Sidebar - Thống kê */}
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Account Statistics</CardTitle>
-              <CardDescription>Thống kê tài khoản</CardDescription>
+              <CardTitle>Thống kê tài khoản</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -306,62 +514,53 @@ export default function SettingsPage() {
                     <User className="h-5 w-5 text-blue-600" />
                   </div>
                   <div>
-                    <p className="font-medium">{currentUser.stats.totalContacts}</p>
-                    <p className="text-sm text-muted-foreground">Total Contacts / Tổng liên hệ</p>
+                    <p className="font-medium">{stats.totalContacts}</p>
+                    <p className="text-sm text-muted-foreground">Tổng liên hệ</p>
                   </div>
                 </div>
-
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
                     <Mail className="h-5 w-5 text-green-600" />
                   </div>
                   <div>
-                    <p className="font-medium">{currentUser.stats.contactsThisMonth}</p>
-                    <p className="text-sm text-muted-foreground">This Month / Tháng này</p>
+                    <p className="font-medium">{stats.contactsThisMonth}</p>
+                    <p className="text-sm text-muted-foreground">Tháng này</p>
                   </div>
                 </div>
-
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
                     <Calendar className="h-5 w-5 text-yellow-600" />
                   </div>
                   <div>
-                    <p className="font-medium">{currentUser.stats.appointmentsThisWeek}</p>
-                    <p className="text-sm text-muted-foreground">Appointments / Cuộc hẹn</p>
+                    <p className="font-medium">{stats.appointmentsThisWeek}</p>
+                    <p className="text-sm text-muted-foreground">Cuộc hẹn</p>
                   </div>
                 </div>
-
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
                     <BarChart3 className="h-5 w-5 text-purple-600" />
                   </div>
                   <div>
-                    <p className="font-medium">{currentUser.stats.conversionRate}%</p>
-                    <p className="text-sm text-muted-foreground">Conversion Rate / Tỷ lệ chuyển đổi</p>
+                    <p className="font-medium">{stats.conversionRate}%</p>
+                    <p className="text-sm text-muted-foreground">Tỷ lệ chuyển đổi</p>
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader>
-              <CardTitle>Account Activity</CardTitle>
-              <CardDescription>Hoạt động tài khoản</CardDescription>
+              <CardTitle>Hoạt động tài khoản</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span>Last Login / Đăng nhập cuối</span>
-                  <span className="font-medium">{currentUser.lastLogin}</span>
+              <div>
+                <div>
+                  <span>Thành viên từ</span>
+                  <span className="ml-2 font-medium">{joinDate}</span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span>Member Since / Thành viên từ</span>
-                  <span className="font-medium">{currentUser.joinDate}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Account Type / Loại tài khoản</span>
-                  <Badge className="bg-blue-100 text-blue-800">{currentUser.role}</Badge>
+                <div>
+                  <span>Loại tài khoản</span>
+                  <Badge className="ml-2 bg-blue-100 text-blue-800">{role}</Badge>
                 </div>
               </div>
             </CardContent>
@@ -369,5 +568,5 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

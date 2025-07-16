@@ -35,8 +35,8 @@ const permissionModules = [
 ];
 
 // Default permission for role
-const getDefaultPermissions = (role: string) => {
-  switch (role.toLowerCase()) {
+const getDefaultPermissions = (role) => {
+  switch (role?.toLowerCase()) {
     case "admin":
       return {
         contacts: { view: true, edit: true, delete: true },
@@ -64,7 +64,10 @@ const getDefaultPermissions = (role: string) => {
   }
 };
 
-const UserForm = ({ formData, setFormData, isEdit = false }) => (
+// Lấy danh sách manager để chọn khi add/edit sales
+const getManagerOptions = (users) => users.filter((u) => u.role === "manager");
+
+const UserForm = ({ formData, setFormData, users, isEdit = false }) => (
   <div className="grid gap-6">
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="space-y-2">
@@ -113,7 +116,16 @@ const UserForm = ({ formData, setFormData, isEdit = false }) => (
           Role <span className="text-red-500">*</span>
           <span className="block text-xs text-muted-foreground">Vai trò</span>
         </Label>
-        <Select value={formData.role} onValueChange={(value) => setFormData((f) => ({ ...f, role: value }))}>
+        <Select
+          value={formData.role}
+          onValueChange={(value) =>
+            setFormData((f) => ({
+              ...f,
+              role: value,
+              manager_id: value === "sales" ? f.manager_id : undefined, // reset nếu không phải sales
+            }))
+          }
+        >
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
@@ -127,6 +139,31 @@ const UserForm = ({ formData, setFormData, isEdit = false }) => (
         </Select>
       </div>
     </div>
+    {formData.role === "sales" && (
+      <div className="space-y-2">
+        <Label htmlFor="manager_id">
+          Quản lý trực tiếp
+          <span className="block text-xs text-muted-foreground">Manager</span>
+        </Label>
+        <Select
+          value={formData.manager_id || undefined}
+          onValueChange={(value) => setFormData((f) => ({ ...f, manager_id: value }))}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Chọn manager..." />
+          </SelectTrigger>
+          <SelectContent>
+            {/* KHÔNG có dòng value=""! */}
+            {getManagerOptions(users).map((manager) => (
+              <SelectItem key={manager.id} value={manager.id}>
+                {manager.name} ({manager.email})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    )}
+
     {!isEdit && (
       <div className="space-y-2">
         <Label htmlFor="password">
@@ -139,6 +176,21 @@ const UserForm = ({ formData, setFormData, isEdit = false }) => (
           value={formData.password}
           onChange={(e) => setFormData((f) => ({ ...f, password: e.target.value }))}
           placeholder="Nhập mật khẩu hoặc để trống để tự sinh"
+        />
+      </div>
+    )}
+    {isEdit && (
+      <div className="space-y-2">
+        <Label htmlFor="password">
+          Đặt lại mật khẩu mới (tuỳ chọn)
+          <span className="block text-xs text-muted-foreground">Nhập nếu muốn đổi mật khẩu cho user này</span>
+        </Label>
+        <Input
+          id="password"
+          type="password"
+          value={formData.password || ""}
+          onChange={(e) => setFormData((f) => ({ ...f, password: e.target.value }))}
+          placeholder="Nhập mật khẩu mới, để trống nếu không đổi"
         />
       </div>
     )}
@@ -166,16 +218,16 @@ const UserForm = ({ formData, setFormData, isEdit = false }) => (
 
 export default function UsersPage() {
   // ----- State -----
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRole, setSelectedRole] = useState("All");
   const [selectedStatus, setSelectedStatus] = useState("All");
-  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedUser, setSelectedUser] = useState(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isPermissionDialogOpen, setIsPermissionDialogOpen] = useState(false);
-  const [userToDelete, setUserToDelete] = useState<any>(null);
+  const [userToDelete, setUserToDelete] = useState(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -184,6 +236,7 @@ export default function UsersPage() {
     phone: "",
     role: "sales",
     status: "active",
+    manager_id: undefined, // sửa lại
     password: "",
   });
 
@@ -207,6 +260,7 @@ export default function UsersPage() {
             role: row.role,
             status: (row.status || "active").charAt(0).toUpperCase() + (row.status || "active").slice(1),
             permissions: getDefaultPermissions(row.role),
+            manager_id: row.manager_id || undefined,
           }))
         );
       }
@@ -243,7 +297,10 @@ export default function UsersPage() {
     try {
       const res = await fetch("/api/users/create", {
         method: "POST",
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          manager_id: formData.role === "sales" ? formData.manager_id ?? null : null,
+        }),
         headers: { "Content-Type": "application/json" },
       });
       const json = await res.json();
@@ -269,6 +326,7 @@ export default function UsersPage() {
         phone: "",
         role: "sales",
         status: "active",
+        manager_id: undefined,
         password: "",
       });
       toast.success("Đã thêm người dùng thành công!");
@@ -277,75 +335,87 @@ export default function UsersPage() {
     }
   }, [formData]);
 
-  // Sửa user (bảng profiles)
+  // Sửa user (gọi API /api/users/update)
   const handleEditUser = useCallback(async () => {
-  if (!selectedUser) return;
-  const userId = selectedUser.id;
+    if (!selectedUser) return;
+    const userId = selectedUser.id;
 
-  // 1. Kiểm tra trùng email/phone (ngoại trừ chính user này)
-  const { data: existed } = await supabase
-    .from("profiles")
-    .select("id")
-    .or(`email.eq.${formData.email},phone.eq.${formData.phone}`)
-    .neq("id", userId);
+    // 1. Kiểm tra trùng email/phone (ngoại trừ chính user này)
+    const { data: existed } = await supabase
+      .from("profiles")
+      .select("id")
+      .or(`email.eq.${formData.email},phone.eq.${formData.phone}`)
+      .neq("id", userId);
 
-  if (existed && existed.length > 0) {
-    toast.error("Email hoặc số điện thoại đã tồn tại, vui lòng nhập lại!");
-    return;
-  }
+    if (existed && existed.length > 0) {
+      toast.error("Email hoặc số điện thoại đã tồn tại, vui lòng nhập lại!");
+      return;
+    }
 
-  // 2. Update ĐẦY ĐỦ trường, kể cả email
-  const update = {
-    full_name: formData.name,
-    phone: formData.phone,
-    role: formData.role,
-    status: formData.status,
-    email: formData.email,         // << Thêm dòng này nếu chưa có
-    // avatar_url: ... nếu cần
-  };
-  const { error } = await supabase.from("profiles").update(update).eq("id", userId);
-  if (error) {
-    toast.error("Update user failed!");
-    return;
-  }
-  setUsers((prev) =>
-    prev.map((u) =>
-      u.id === userId
-        ? { ...u, ...formData, name: formData.name, permissions: getDefaultPermissions(formData.role) }
-        : u
-    )
-  );
-  setIsEditDialogOpen(false);
-  setSelectedUser(null);
-  toast.success("Đã cập nhật người dùng thành công!");
-}, [selectedUser, formData]);
+    // 2. Gọi API update user
+    const res = await fetch("/api/users/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: userId,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        role: formData.role,
+        status: formData.status.toLowerCase(),
+        manager_id: formData.role === "sales" ? formData.manager_id ?? null : null,
+        password: formData.password, // Để trống nếu không đổi
+      }),
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      toast.error(result?.error || "Update user failed!");
+      return;
+    }
 
-
-
+    // Update user in state
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === userId
+          ? {
+              ...u,
+              name: formData.name,
+              email: formData.email,
+              phone: formData.phone,
+              role: formData.role.toLowerCase(),
+              status: formData.status.toLowerCase(),
+              manager_id: formData.role === "sales" ? formData.manager_id ?? null : null,
+              permissions: getDefaultPermissions(formData.role),
+            }
+          : u
+      )
+    );
+    setIsEditDialogOpen(false);
+    setSelectedUser(null);
+    toast.success("Đã cập nhật người dùng thành công!");
+  }, [selectedUser, formData]);
 
   // Xoá user (bảng profiles)
   const handleDeleteUser = useCallback(async () => {
-  if (!userToDelete) return;
-  const userId = userToDelete.id;
+    if (!userToDelete) return;
+    const userId = userToDelete.id;
 
-  // Gọi API xoá (xử lý cả Auth + profiles)
-  const res = await fetch("/api/users/delete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: userId }),
-  });
-  const json = await res.json();
-  if (!res.ok) {
-    toast.error(json?.error || "Delete user failed!");
-    return;
-  }
-  setUsers((prev) => prev.filter((u) => u.id !== userId));
-  setIsDeleteDialogOpen(false);
-  setUserToDelete(null);
-  toast.success("Đã xóa người dùng thành công!");
-}, [userToDelete]);
-
-
+    // Gọi API xoá (xử lý cả Auth + profiles)
+    const res = await fetch("/api/users/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: userId }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      toast.error(json?.error || "Delete user failed!");
+      return;
+    }
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    setIsDeleteDialogOpen(false);
+    setUserToDelete(null);
+    toast.success("Đã xóa người dùng thành công!");
+  }, [userToDelete]);
 
   const openEditDialog = useCallback((user) => {
     setSelectedUser(user);
@@ -354,7 +424,8 @@ export default function UsersPage() {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      status: user.status,
+      status: formData.status.toLowerCase(),
+      manager_id: user.manager_id || undefined,
       password: "",
     });
     setIsEditDialogOpen(true);
@@ -367,13 +438,14 @@ export default function UsersPage() {
       phone: "",
       role: "sales",
       status: "active",
+      manager_id: undefined,
       password: "",
     });
     setIsAddDialogOpen(true);
   }, []);
 
   // Màu badge
-  const getRoleColor = (role: string) => {
+  const getRoleColor = (role) => {
     switch (role?.toLowerCase()) {
       case "admin":
         return "bg-red-100 text-red-800";
@@ -385,7 +457,7 @@ export default function UsersPage() {
         return "bg-gray-100 text-gray-800";
     }
   };
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status) => {
     return status?.toLowerCase() === "active"
       ? "bg-green-100 text-green-800"
       : "bg-gray-100 text-gray-800";
@@ -462,6 +534,7 @@ export default function UsersPage() {
                   <TableHead>Email</TableHead>
                   <TableHead className="hidden md:table-cell">Phone / SĐT</TableHead>
                   <TableHead>Role / Vai trò</TableHead>
+                  <TableHead>Quản lý</TableHead>
                   <TableHead>Status / Trạng thái</TableHead>
                   <TableHead className="hidden lg:table-cell">Created / Tạo lúc</TableHead>
                   <TableHead>Actions / Thao tác</TableHead>
@@ -477,7 +550,7 @@ export default function UsersPage() {
                           <AvatarFallback>
                             {user.name
                               .split(" ")
-                              .map((n: string) => n[0])
+                              .map((n) => n[0])
                               .join("")}
                           </AvatarFallback>
                         </Avatar>
@@ -490,6 +563,15 @@ export default function UsersPage() {
                     <TableCell className="hidden md:table-cell">{user.phone}</TableCell>
                     <TableCell>
                       <Badge className={getRoleColor(user.role)}>{user.role}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      {/* Nếu là sales và có manager_id, tìm user tương ứng */}
+                      {user.role === "sales" && user.manager_id
+                        ? (() => {
+                            const manager = users.find(u => u.id === user.manager_id);
+                            return manager ? manager.name : "Chưa phân bổ";
+                          })()
+                        : "-"}
                     </TableCell>
                     <TableCell>
                       <Badge className={getStatusColor(user.status)}>{user.status}</Badge>
@@ -558,7 +640,7 @@ export default function UsersPage() {
                 Tạo tài khoản người dùng mới với quyền hạn phù hợp
               </DialogDescription>
             </DialogHeader>
-            <UserForm formData={formData} setFormData={setFormData} isEdit={false} />
+            <UserForm formData={formData} setFormData={setFormData} users={users} isEdit={false} />
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                 Cancel / Hủy
@@ -582,7 +664,7 @@ export default function UsersPage() {
               Cập nhật thông tin và cài đặt người dùng
             </DialogDescription>
           </DialogHeader>
-          <UserForm formData={formData} setFormData={setFormData} isEdit={true} />
+          <UserForm formData={formData} setFormData={setFormData} users={users} isEdit={true} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               Cancel / Hủy
@@ -609,7 +691,7 @@ export default function UsersPage() {
                   <AvatarFallback>
                     {selectedUser.name
                       .split(" ")
-                      .map((n: string) => n[0])
+                      .map((n) => n[0])
                       .join("")}
                   </AvatarFallback>
                 </Avatar>
@@ -622,7 +704,6 @@ export default function UsersPage() {
                   </div>
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Phone / SĐT</Label>
@@ -633,7 +714,6 @@ export default function UsersPage() {
                   <p className="text-sm text-muted-foreground">{selectedUser.createdAt}</p>
                 </div>
               </div>
-
               <div>
                 <Label>Permissions / Quyền hạn</Label>
                 <div className="mt-2 space-y-2">
@@ -646,7 +726,9 @@ export default function UsersPage() {
                           {perms?.view && <Badge variant="outline">View</Badge>}
                           {perms?.edit && <Badge variant="outline">Edit</Badge>}
                           {perms?.delete && <Badge variant="outline">Delete</Badge>}
-                          {!perms?.view && !perms?.edit && !perms?.delete && <Badge variant="secondary">No Access</Badge>}
+                          {!perms?.view && !perms?.edit && !perms?.delete && (
+                            <Badge variant="secondary">No Access</Badge>
+                          )}
                         </div>
                       </div>
                     );

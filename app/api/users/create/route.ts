@@ -10,19 +10,30 @@ const supabaseAdmin = createClient(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, email, phone, role, status, password } = body;
+    const { name, email, phone, role, status, password, manager_id } = body; // lấy thêm manager_id
 
     // Sử dụng password người dùng nhập, nếu không thì random 8 ký tự
-    const finalPassword = password && password.length >= 6 ? password : Math.random().toString(36).slice(-8);
+    const finalPassword =
+      password && password.length >= 6
+        ? password
+        : Math.random().toString(36).slice(-8);
 
     // 1. Tạo tài khoản Auth
-    console.log("Creating user:", { email, finalPassword, name, role, status });
-
-    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
+    console.log("Creating user:", {
       email,
-      password: finalPassword,
-      email_confirm: true,
+      finalPassword,
+      name,
+      role,
+      status,
+      manager_id,
     });
+
+    const { data: userData, error: userError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: finalPassword,
+        email_confirm: true,
+      });
 
     if (userError || !userData?.user) {
       console.error("Supabase Auth Error:", userError);
@@ -43,6 +54,7 @@ export async function POST(req: NextRequest) {
           role,
           status: status?.toLowerCase(),
           email, // Nếu bảng bạn có trường email
+          manager_id: manager_id || null, // <<<<<<<<<<<<<< THÊM DÒNG NÀY!
         },
       ]);
 

@@ -307,6 +307,7 @@ const handleAddContact = async () => {
     ...newContact,
     assigned_to: newContact.assigned_to === "unassigned" ? null : newContact.assigned_to,
     tags: newContact.tags,
+    created_by: user?.id,
   };
 
   const { data, error } = await supabase
