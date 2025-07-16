@@ -58,21 +58,31 @@ export default function ImportPage() {
     setUploadProgress(0)
 
     Papa.parse(selectedFile, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const rows = results.data as any[]
-        const validated = rows.map((row) => {
-          const errors = []
-          if (!row.name) errors.push("Name is required")
-          if (!row.email || !/\S+@\S+\.\S+/.test(row.email)) errors.push("Invalid email")
-          return { ...row, status: errors.length === 0 ? "valid" : "error", errors }
-        })
-        setPreviewData(validated)
-        setIsUploading(false)
-        setUploadProgress(100)
-        setImportStatus("preview")
-      },
+  header: true,
+  skipEmptyLines: true,
+  complete: (results) => {
+    const rows = results.data as any[]
+    const validated = rows.map((row) => {
+      const errors = []
+      if (!row.name) errors.push("Name is required")
+
+      const hasEmail = row.email && row.email.trim() !== ""
+      const hasPhone = row.phone && row.phone.trim() !== ""
+      if (!hasEmail && !hasPhone) {
+        errors.push("Cần ít nhất một trong hai: Email hoặc Số điện thoại")
+      }
+
+      if (hasEmail && !/\S+@\S+\.\S+/.test(row.email)) {
+        errors.push("Email không hợp lệ")
+      }
+
+      return { ...row, status: errors.length === 0 ? "valid" : "error", errors }
+    })
+    setPreviewData(validated)
+    setIsUploading(false)
+    setUploadProgress(100)
+    setImportStatus("preview")
+  },
     })
   }
 
