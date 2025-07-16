@@ -124,7 +124,7 @@ const fetchNextAppointmentDuration = async (contactId, scheduledAt) => {
 export default function ContactsPage() {
   // ----------------- State -----------------
   const { user } = useAuth()
-
+  const [myManagedSales, setMyManagedSales] = useState<string[]>([]);
   const [showDateEdit, setShowDateEdit] = useState(false);
   const [appointmentDate, setAppointmentDate] = React.useState("");
   const [appointmentDuration, setAppointmentDuration] = useState(30); 
@@ -236,33 +236,113 @@ const fetchContactActivities = async (contactId: string) => {
   }, [])
 
   const fetchOptions = async () => {
+  const { data: appConfig } = await supabase.from("app_config").select("*").eq("active", true)
+  setCompanySizeOptions(appConfig?.filter((i: any) => i.type === "company_size") || [])
+  setIndustryOptions(appConfig?.filter((i: any) => i.type === "industry") || [])
+  setDataSourceOptions(appConfig?.filter((i: any) => i.type === "data_source") || [])
 
-    const { data: appConfig } = await supabase.from("app_config").select("*").eq("active", true)
-    setCompanySizeOptions(appConfig?.filter((i: any) => i.type === "company_size") || [])
-    setIndustryOptions(appConfig?.filter((i: any) => i.type === "industry") || [])
-    setDataSourceOptions(appConfig?.filter((i: any) => i.type === "data_source") || [])
+  // Lấy danh sách profile (tất cả người phụ trách)
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, manager_id");
+  setProfileOptions(profiles || []);
 
-    // Lấy danh sách profile (tất cả người phụ trách)
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, full_name");
-    setProfileOptions(profiles || []);
+  // Dù user thay đổi thì cũng phải set lại
+  if (user?.role === "manager" && profiles) {
+    const mySales = profiles
+      .filter((p) => p.manager_id === user.id && p.role === "sales")
+      .map((p) => p.id);
+    setMyManagedSales(mySales);
+  } else {
+    setMyManagedSales([]); // reset nếu không phải manager
+  }
+};
+
+
+const fetchContacts = async () => {
+  if (!user) {
+    setContacts([]);
+    return;
   }
 
-  const fetchContacts = async () => {
-    const { data } = await supabase.from("contacts").select("*")
-    setContacts(data || [])
+  // 1. Lấy luôn cả full profile (vì đôi khi user login lần đầu chưa đủ context)
+  const { data: myProfile } = await supabase
+    .from("profiles")
+    .select("id, role")
+    .eq("id", user.id)
+    .single();
+
+  if (!myProfile) {
+    setContacts([]);
+    return;
   }
+
+  if (myProfile.role === "admin") {
+    // Admin lấy tất cả
+    const { data } = await supabase.from("contacts").select("*");
+    setContacts(data || []);
+    return;
+  }
+
+  if (myProfile.role === "manager") {
+    // Lấy danh sách sales dưới quyền (từ myManagedSales đã set ở fetchOptions)
+    let responsibleIds = [user.id];
+    if (myManagedSales && myManagedSales.length > 0) {
+      responsibleIds = responsibleIds.concat(myManagedSales);
+    }
+
+    // Lấy contacts assigned_to là manager hoặc sales dưới quyền
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("*")
+      .in("assigned_to", responsibleIds);
+
+    if (error) console.log("Supabase error: ", error);
+
+    setContacts(data || []);
+    return;
+  }
+
+  // Sales: chỉ lấy contact của chính mình
+  const { data } = await supabase
+    .from("contacts")
+    .select("*")
+    .eq("assigned_to", user.id);
+  setContacts(data || []);
+};
+
+
+
 
   // ----------------- FILTER -----------------
-  const filteredContacts = contacts.filter((contact) => {
-    const matchesSearch =
-      (contact.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (contact.email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (contact.company || "").toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesLifeStage = lifeStageFilter === "all" || contact.life_stage === lifeStageFilter
-    return matchesSearch && matchesLifeStage
-  })
+const filteredContacts = contacts.filter((contact) => {
+  // Xét quyền truy cập theo role
+  if (user?.role === "admin") {
+    // Admin thấy tất cả
+    return true;
+  } else if (user?.role === "manager") {
+    // Manager: assigned_to là mình hoặc là sales thuộc quyền quản lý
+    return (
+      contact.assigned_to === user.id ||
+      (myManagedSales.length > 0 && myManagedSales.includes(contact.assigned_to))
+    );
+  } else if (user?.role === "sales") {
+    // Sales: chỉ được thấy contact assigned_to là mình
+    return contact.assigned_to === user.id;
+  }
+  return false; // Mặc định không cho ai khác
+}).filter((contact) => {
+
+  
+  // Tiếp tục filter theo search/life stage
+  const matchesSearch =
+    (contact.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (contact.email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (contact.company || "").toLowerCase().includes(searchTerm.toLowerCase());
+  const matchesLifeStage = lifeStageFilter === "all" || contact.life_stage === lifeStageFilter;
+  return matchesSearch && matchesLifeStage;
+});
+
 
   // ------------- CRUD HANDLERS --------------
 const handleAddContact = async () => {
@@ -1235,6 +1315,7 @@ const handleDeleteActivity = async (activityId: string) => {
               </div>
             ))}
           </div>
+
         </CardContent>
         </Card>
       </div>
