@@ -3,7 +3,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
 
 interface ActivityChartProps {
-  data: {
+  data?: {
     month: string
     contacts: number
     appointments: number
@@ -11,9 +11,12 @@ interface ActivityChartProps {
 }
 
 export function ActivityChart({ data }: ActivityChartProps) {
+  // Gán mặc định là [] nếu data không phải mảng
+  const safeData = Array.isArray(data) ? data : []
+
   return (
     <ResponsiveContainer width="100%" height={300}>
-      <LineChart data={data}>
+      <LineChart data={safeData}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="month" />
         <YAxis allowDecimals={false} />

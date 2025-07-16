@@ -11,14 +11,11 @@ import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 dayjs.extend(relativeTime)
 
-function calcChange(current: number, previous: number): { value: string; type: "positive" | "negative" } {
-  if (previous === 0) return { value: "+100%", type: "positive" }
-  const diff = current - previous
-  const percent = ((diff / previous) * 100).toFixed(1)
-  return {
-    value: `${diff >= 0 ? "+" : ""}${percent}%`,
-    type: diff >= 0 ? "positive" : "negative",
-  }
+const ICONS = {
+  Users,
+  TrendingUp,
+  UserPlus,
+  Target,
 }
 
 export default function Dashboard() {
@@ -28,8 +25,28 @@ export default function Dashboard() {
   const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [user, setUser] = useState<any>(null)
   const [userRole, setUserRole] = useState<string>("")
+  const [loading, setLoading] = useState(true)
 
-  // Lấy thông tin user và role khi load trang
+  // Lấy thông tin user và role khi load trang (vẫn cần cho phần activity filter)
+  useEffect(() => {
+    setLoading(true)
+    fetch("/api/dashboard", { cache: "no-store" })
+      .then(res => res.json())
+      .then((res) => {
+        setStats(Array.isArray(res.stats) ? res.stats : [])
+        setLifeStageData(Array.isArray(res.lifeStageData) ? res.lifeStageData : [])
+        setActivityData(Array.isArray(res.activityData) ? res.activityData : [])
+        setLoading(false)
+      })
+      .catch(() => {
+        setStats([])
+        setLifeStageData([])
+        setActivityData([])
+        setLoading(false)
+      })
+  }, [])
+
+  // Lấy thông tin user, role (phục vụ filter activity)
   useEffect(() => {
     const getUser = async () => {
       const { data } = await supabase.auth.getUser()
@@ -46,66 +63,15 @@ export default function Dashboard() {
     getUser()
   }, [])
 
+  // Recent activity: lấy theo quyền user
   useEffect(() => {
     if (userRole && user) {
-      fetchDashboard()
+      fetchRecentActivity()
     }
     // eslint-disable-next-line
   }, [userRole, user])
 
-  async function fetchDashboard() {
-    // ---- STATS ----
-    const { count: totalContacts } = await supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-
-    const { count: totalLeads } = await supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("life_stage", "Lead")
-
-    const startOfThisMonth = dayjs().startOf("month").toISOString()
-    const startOfLastMonth = dayjs().subtract(1, "month").startOf("month").toISOString()
-
-    const { count: thisMonthContacts } = await supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .gte("created_at", startOfThisMonth)
-
-    const { count: lastMonthContacts } = await supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .gte("created_at", startOfLastMonth)
-      .lt("created_at", startOfThisMonth)
-
-    // ---- CONTACTS BY LIFE STAGE ----
-    const { data: allContacts } = await supabase.from("contacts").select("life_stage")
-    const stageArr = ["Subscriber", "Lead", "Opportunity", "Customer"]
-    const grouped = stageArr.map((stage) => ({
-      name: stage,
-      value: allContacts?.filter((c) => c.life_stage?.toLowerCase() === stage.toLowerCase()).length || 0,
-    }))
-    setLifeStageData(grouped)
-
-    // ---- ACTIVITY TREND (12 tháng) ----
-    const { data: contactsAll } = await supabase.from("contacts").select("created_at")
-    const { data: appointmentsAll } = await supabase.from("appointments").select("scheduled_at")
-    const months = Array.from({ length: 12 }, (_, i) =>
-      dayjs().subtract(11 - i, "month").startOf("month")
-    )
-    const trend = months.map((month) => {
-      const m = month.format("MMM")
-      const contacts = contactsAll?.filter((c) =>
-        dayjs(c.created_at).isSame(month, "month")
-      ).length || 0
-      const appointments = appointmentsAll?.filter((a) =>
-        dayjs(a.scheduled_at).isSame(month, "month")
-      ).length || 0
-      return { month: m, contacts, appointments }
-    })
-    setActivityData(trend)
-
-    // ---- RECENT ACTIVITY ----
+  async function fetchRecentActivity() {
     let activityQuery = supabase
       .from("contact_history")
       .select(`
@@ -119,12 +85,12 @@ export default function Dashboard() {
         user:profiles(full_name)
       `)
       .order("action_time", { ascending: false })
-      .limit(10) // lấy 10 activity gần nhất
+      .limit(10)
 
     if (userRole === "sales" && user) {
       activityQuery = activityQuery.eq("user_id", user.id)
     } else if (userRole === "manager" && user) {
-      // Lấy id của các sales mà manager này quản lý
+      // Lấy id các sales mà manager này quản lý
       const { data: salesList } = await supabase
         .from("profiles")
         .select("id")
@@ -132,47 +98,9 @@ export default function Dashboard() {
       const salesIds = salesList?.map((u) => u.id) || []
       activityQuery = activityQuery.in("user_id", [user.id, ...salesIds])
     }
-    // admin thì không filter gì
 
     const { data: activityRaw } = await activityQuery
     setRecentActivities(activityRaw || [])
-
-    // ---- STATS CARDS ----
-    const totalContactsChange = calcChange(thisMonthContacts || 0, lastMonthContacts || 0)
-    setStats([
-      {
-        title: "Total Contacts",
-        vietnamese: "Tổng số liên hệ",
-        value: totalContacts?.toLocaleString() || "0",
-        change: totalContactsChange.value,
-        changeType: totalContactsChange.type,
-        icon: Users,
-      },
-      {
-        title: "Conversion Rate",
-        vietnamese: "Tỷ lệ chuyển đổi",
-        value: "-",
-        change: "+0%",
-        changeType: "positive",
-        icon: TrendingUp,
-      },
-      {
-        title: "Active Leads",
-        vietnamese: "Khách hàng tiềm năng",
-        value: totalLeads?.toLocaleString() || "0",
-        change: "+0%",
-        changeType: "positive",
-        icon: Target,
-      },
-      {
-        title: "New Contacts",
-        vietnamese: "Liên hệ mới",
-        value: thisMonthContacts?.toLocaleString() || "0",
-        change: totalContactsChange.value,
-        changeType: totalContactsChange.type,
-        icon: UserPlus,
-      },
-    ])
   }
 
   return (
@@ -182,54 +110,75 @@ export default function Dashboard() {
         <p className="text-muted-foreground">Bảng điều khiển tổng quan</p>
       </div>
 
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <Card key={stat.title}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                <div className="flex flex-col">
-                  <span>{stat.title}</span>
-                  <span className="text-xs text-muted-foreground font-normal">{stat.vietnamese}</span>
-                </div>
-              </CardTitle>
-              <stat.icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <Badge
-                variant={stat.changeType === "positive" ? "default" : "destructive"}
-                className="mt-1"
-              >
-                {stat.change} from last month
-              </Badge>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {loading ? (
+        <div className="text-center py-12 text-gray-400">Đang tải dữ liệu...</div>
+      ) : (
+        <>
+          {/* Stats */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {Array.isArray(stats) && stats.length > 0 ? (
+              stats.map((stat) => {
+                const Icon = ICONS[stat.icon as keyof typeof ICONS]
+                return (
+                  <Card key={stat.title}>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">
+                        <div className="flex flex-col">
+                          <span>{stat.title}</span>
+                          <span className="text-xs text-muted-foreground font-normal">{stat.vietnamese}</span>
+                        </div>
+                      </CardTitle>
+                      {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{stat.value}</div>
+                      <Badge
+                        variant={stat.changeType === "positive" ? "default" : "destructive"}
+                        className="mt-1"
+                      >
+                        {stat.change} from last month
+                      </Badge>
+                    </CardContent>
+                  </Card>
+                )
+              })
+            ) : (
+              <div className="col-span-4 text-center text-gray-400 py-6">Không có dữ liệu thống kê</div>
+            )}
+          </div>
 
-      {/* Charts */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Contacts by Life Stage</CardTitle>
-            <CardDescription>Liên hệ theo giai đoạn vòng đời</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ContactsChart data={lifeStageData} />
-          </CardContent>
-        </Card>
+          {/* Charts */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Contacts by Life Stage</CardTitle>
+                <CardDescription>Liên hệ theo giai đoạn vòng đời</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {Array.isArray(lifeStageData) && lifeStageData.length > 0 ? (
+                  <ContactsChart data={lifeStageData} />
+                ) : (
+                  <div className="text-center text-gray-400 py-8">Không có dữ liệu</div>
+                )}
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Monthly Activity Trend</CardTitle>
-            <CardDescription>Xu hướng hoạt động hàng tháng</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ActivityChart data={activityData} />
-          </CardContent>
-        </Card>
-      </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Activity Trend</CardTitle>
+                <CardDescription>Xu hướng hoạt động hàng tháng</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {Array.isArray(activityData) && activityData.length > 0 ? (
+                  <ActivityChart data={activityData} />
+                ) : (
+                  <div className="text-center text-gray-400 py-8">Không có dữ liệu</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
 
       {/* Recent Activity */}
       <Card>

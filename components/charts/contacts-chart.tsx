@@ -11,14 +11,17 @@ const COLORS: Record<string, string> = {
 }
 
 interface ContactsChartProps {
-  data: {
+  data?: {
     name: string
     value: number
   }[]
 }
 
 export function ContactsChart({ data }: ContactsChartProps) {
-  const formattedData = data.map((item) => ({
+  // Đảm bảo data luôn là mảng (kể cả khi undefined)
+  const safeData = Array.isArray(data) ? data : []
+
+  const formattedData = safeData.map((item) => ({
     ...item,
     color: COLORS[item.name as keyof typeof COLORS] || "#ccc",
     name: `${item.name} / ${getVietnameseLabel(item.name)}`,

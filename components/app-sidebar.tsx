@@ -31,12 +31,30 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useAuth } from "@/components/auth-provider"
+import { useEffect, useState } from "react"
+import { supabase } from "@/lib/supabaseClient" // Đảm bảo đường dẫn đúng với project
 
 export function AppSidebar() {
   const pathname = usePathname()
   const { state, toggleSidebar } = useSidebar()
   const { user, logout } = useAuth()
   const isCollapsed = state === "collapsed"
+
+  // Thêm state cho thông tin profile
+  const [profile, setProfile] = useState(null)
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!user?.id) return
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name, role, avatar_url")
+        .eq("id", user.id)
+        .single()
+      if (data) setProfile(data)
+    }
+    fetchProfile()
+  }, [user])
 
   // All menu items in a single flat structure
   const menuItems = [
@@ -119,10 +137,10 @@ export function AppSidebar() {
 
   // Helper function to check if user has access to a menu item
   const hasAccess = (item: any) => {
-      if (!item.roles) return true
-      // role so sánh dạng lowercase để tránh bug vặt
-      return item.roles.map((r: string) => r.toLowerCase()).includes((user?.role || "").toLowerCase())
-    }
+    if (!item.roles) return true
+    // role so sánh dạng lowercase để tránh bug vặt
+    return item.roles.map((r: string) => r.toLowerCase()).includes((profile?.role || user?.role || "").toLowerCase())
+  }
 
   const filteredMenuItems = menuItems.filter(hasAccess)
 
@@ -203,18 +221,24 @@ export function AppSidebar() {
                 className={`flex items-center gap-3 p-3 rounded-xl bg-gray-700/30 ${isCollapsed ? "justify-center" : ""}`}
               >
                 <Avatar className="h-8 w-8 border-2 border-gray-600">
-                  <AvatarImage src={user?.avatar || "/placeholder.svg"} />
+                  <AvatarImage src={profile?.avatar_url || "/placeholder.svg"} />
                   <AvatarFallback className="bg-gray-600 text-white text-sm">
-                    {user?.name
+                    {profile?.full_name
                       ?.split(" ")
                       .map((n) => n[0])
-                      .join("") || "U"}
+                      .join("") ||
+                      user?.email?.[0] ||
+                      "U"}
                   </AvatarFallback>
                 </Avatar>
                 {!isCollapsed && (
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white truncate">{user?.name}</div>
-                    <div className="text-xs text-gray-400 truncate">{user?.role}</div>
+                    <div className="text-sm font-medium text-white truncate">
+                      {profile?.full_name || user?.email}
+                    </div>
+                    <div className="text-xs text-gray-400 truncate">
+                      {profile?.role || user?.role || ""}
+                    </div>
                   </div>
                 )}
               </div>
