@@ -255,33 +255,33 @@ export default function ContactsPage() {
   }, [user]);
 
   // Data Fetching
-  const fetchOptions = async () => {
-    const { data: appConfig } = await supabase
-      .from("app_config")
-      .select("*")
-      .eq("active", true);
-    setCompanySizeOptions(appConfig?.filter((i) => i.type === "company_size") || []);
-    setIndustryOptions(appConfig?.filter((i) => i.type === "industry") || []);
-    setDataSourceOptions(appConfig?.filter((i) => i.type === "data_source") || []);
+const fetchOptions = async () => {
+  const { data: appConfig } = await supabase
+    .from("app_config")
+    .select("*")
+    .eq("active", true);
+  setCompanySizeOptions(appConfig?.filter((i) => i.type === "company_size") || []);
+  setIndustryOptions(appConfig?.filter((i) => i.type === "industry") || []);
+  setDataSourceOptions(appConfig?.filter((i) => i.type === "data_source") || []);
 
-    const { data: profiles, error: profilesError } = await supabase
-      .from("profiles")
-      .select("id, full_name, role, manager_id");
-    if (profilesError) {
-      toast.error("Lỗi khi lấy danh sách profiles: " + profilesError.message);
-      return;
-    }
-    setProfileOptions(profiles || []);
+  const { data: profiles, error: profilesError } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, manager_id");
+  if (profilesError) {
+    toast.error("Lỗi khi lấy danh sách profiles: " + profilesError.message);
+    return;
+  }
+  setProfileOptions(profiles || []);
 
-    if (user?.role === "manager" && profiles) {
-      const mySales = profiles
-        .filter((p) => p.manager_id === user.id && p.role === "sales")
-        .map((p) => p.id);
-      setMyManagedSales(mySales);
-    } else {
-      setMyManagedSales([]);
-    }
-  };
+  if (user?.role === "manager" && profiles) {
+    const mySales = profiles
+      .filter((p) => p.manager_id === user.id && p.role === "sales")
+      .map((p) => p.id);
+    setMyManagedSales(mySales);
+  } else {
+    setMyManagedSales([]);
+  }
+};
 
   const fetchContacts = async () => {
     if (!user) {
@@ -1435,65 +1435,70 @@ export default function ContactsPage() {
                       <UserCheck className="h-4 w-4 text-blue-400" />Người phụ trách
                     </Label>
                     <Select
-                      value={selectedContact.assigned_to || "unassigned"}
-                      onValueChange={async (value) => {
-                        const oldAssigned = selectedContact.assigned_to;
-                        const newAssigned = value === "unassigned" ? null : value;
-                        const { error } = await supabase
-                          .from("contacts")
-                          .update({ assigned_to: newAssigned })
-                          .eq("id", selectedContact.id);
-
-                        if (error) {
-                          toast.error("Cập nhật người phụ trách thất bại: " + error.message);
-                          return;
-                        }
-
-                        toast.success("Đã cập nhật người phụ trách thành công");
-                        setSelectedContact({ ...selectedContact, assigned_to: newAssigned });
-                        fetchContacts();
-
-                        if (user?.id) {
-                          const oldUser =
-                            profileOptions.find((p) => p.id === oldAssigned)?.full_name ||
-                            "Unassigned";
-                          const newUser =
-                            profileOptions.find((p) => p.id === newAssigned)?.full_name ||
-                            "Unassigned";
-                          await fetch("/api/activity/log", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              user_id: user.id,
-                              action_type: "assigned_changed",
-                              target_id: selectedContact.id,
-                              target_type: "contact",
-                              detail: {
-                                contactName: selectedContact.name,
-                                from: oldUser,
-                                to: newUser,
-                                userName: user.full_name,
-                                changedAt: new Date().toISOString(),
-                              },
-                            }),
-                          });
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="w-[220px]">
-                        <SelectValue placeholder="Chọn người phụ trách..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
-                        {profileOptions
-                          .filter((profile) => profile.role === "sales" || profile.id === user?.id)
-                          .map((profile) => (
-                            <SelectItem key={profile.id} value={profile.id}>
-                              {profile.full_name} {profile.role === "sales" ? "(Sales)" : "(Manager)"}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+    value={selectedContact.assigned_to || "unassigned"}
+    onValueChange={async (value) => {
+      const oldAssigned = selectedContact.assigned_to;
+      const newAssigned = value === "unassigned" ? null : value;
+      const { error } = await supabase
+        .from("contacts")
+        .update({ assigned_to: newAssigned })
+        .eq("id", selectedContact.id);
+      if (error) {
+        toast.error("Cập nhật người phụ trách thất bại: " + error.message);
+      } else {
+        toast.success("Đã cập nhật người phụ trách thành công");
+        setSelectedContact({ ...selectedContact, assigned_to: newAssigned });
+        fetchContacts();
+        if (user?.id) {
+          const oldUser = profileOptions.find((p) => p.id === oldAssigned)?.full_name || "Unassigned";
+          const newUser = profileOptions.find((p) => p.id === newAssigned)?.full_name || "Unassigned";
+          await fetch("/api/activity/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: user.id,
+              action_type: "assigned_changed",
+              target_id: selectedContact.id,
+              target_type: "contact",
+              detail: {
+                contactName: selectedContact.name,
+                from: oldUser,
+                to: newUser,
+                userName: user.full_name,
+                changedAt: new Date().toISOString(),
+              },
+            }),
+          });
+        }
+      }
+    }}
+  >
+    <SelectTrigger className="w-[220px]">
+      <SelectValue placeholder="Chọn người phụ trách..." />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
+      {profileOptions
+        .filter((profile) => {
+          if (user?.role === "admin") return true; // Admin thấy tất cả
+          if (user?.role === "manager") {
+            return profile.id === user.id || (profile.manager_id === user.id && profile.role === "sales");
+          }
+          if (user?.role === "sales") {
+            return profile.id === user.id || (profile.role === "sales" && profile.manager_id === user.manager_id);
+          }
+          return false;
+        })
+        .map((profile) => (
+          <SelectItem key={profile.id} value={profile.id}>
+            {profile.full_name} 
+            {profile.role === "admin" ? "(Admin)" : 
+             profile.role === "manager" ? "(Manager)" : 
+             profile.role === "sales" ? "(Sales)" : ""}
+          </SelectItem>
+        ))}
+    </SelectContent>
+  </Select>
                   </div>
                 </div>
               </div>
