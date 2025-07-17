@@ -1,189 +1,232 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Bell, Calendar, User, Settings, Check } from "lucide-react"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Bell, Calendar, User, Settings, Check } from "lucide-react";
+import { toast } from "sonner";
+import {
+  fetchNotifications,
+  markAsRead,
+  markAllAsRead,
+  getNotificationStats,
+  updateNotificationSettings,
+  setupRealtimeNotifications,
+} from "@/lib/supabaseClient";
+import { useAuth } from "@/components/auth-provider";
+import { supabase } from "@/lib/supabaseClient";
 
-// Mock notifications data
-const notifications = [
-  {
-    id: 1,
-    type: "appointment",
-    title: "Upcoming Appointment",
-    vietnamese: "Cuộc hẹn sắp tới",
-    message: "Meeting with John Smith in 30 minutes",
-    vietnameseMessage: "Cuộc họp với John Smith trong 30 phút nữa",
-    time: "2024-01-15 09:30",
-    priority: "high",
-    read: false,
-    contactId: 1,
-    contactName: "John Smith",
-    avatar: "/placeholder.svg?height=32&width=32",
-  },
-  {
-    id: 2,
-    type: "contact",
-    title: "New Contact Added",
-    vietnamese: "Đã thêm liên hệ mới",
-    message: "Maria Garcia has been added to your contacts",
-    vietnameseMessage: "Maria Garcia đã được thêm vào danh bạ của bạn",
-    time: "2024-01-15 08:45",
-    priority: "medium",
-    read: false,
-    contactId: 2,
-    contactName: "Maria Garcia",
-    avatar: "/placeholder.svg?height=32&width=32",
-  },
-  {
-    id: 3,
-    type: "pipeline",
-    title: "Contact Moved to Opportunity",
-    vietnamese: "Liên hệ chuyển sang Cơ hội",
-    message: "David Wilson moved to Opportunity stage",
-    vietnameseMessage: "David Wilson đã chuyển sang giai đoạn Cơ hội",
-    time: "2024-01-15 07:20",
-    priority: "medium",
-    read: true,
-    contactId: 3,
-    contactName: "David Wilson",
-    avatar: "/placeholder.svg?height=32&width=32",
-  },
-  {
-    id: 4,
-    type: "system",
-    title: "Weekly Report Ready",
-    vietnamese: "Báo cáo tuần đã sẵn sàng",
-    message: "Your weekly performance report is now available",
-    vietnameseMessage: "Báo cáo hiệu suất tuần của bạn đã có sẵn",
-    time: "2024-01-15 06:00",
-    priority: "low",
-    read: true,
-    contactId: null,
-    contactName: null,
-    avatar: null,
-  },
-]
+interface Notification {
+  id: string;
+  type: string;
+  payload: { en: { title: string; message: string }; vi: { title: string; message: string } };
+  time: string;
+  priority: string;
+  read_at: string | null;
+  link: string | null;
+  contact_id: string | null;
+  contact_name: string | null;
+  actor_id: string | null;
+}
 
-const notificationSettings = [
-  {
-    id: "appointments",
-    title: "Appointment Reminders",
-    vietnamese: "Nhắc nhở cuộc hẹn",
-    description: "Get notified before appointments",
-    vietnameseDescription: "Nhận thông báo trước cuộc hẹn",
-    enabled: true,
-  },
-  {
-    id: "new_contacts",
-    title: "New Contacts",
-    vietnamese: "Liên hệ mới",
-    description: "Notifications when new contacts are added",
-    vietnameseDescription: "Thông báo khi có liên hệ mới được thêm",
-    enabled: true,
-  },
-  {
-    id: "pipeline_changes",
-    title: "Pipeline Changes",
-    vietnamese: "Thay đổi quy trình",
-    description: "Updates when contacts move between stages",
-    vietnameseDescription: "Cập nhật khi liên hệ di chuyển giữa các giai đoạn",
-    enabled: true,
-  },
-  {
-    id: "system_updates",
-    title: "System Updates",
-    vietnamese: "Cập nhật hệ thống",
-    description: "System maintenance and feature updates",
-    vietnameseDescription: "Bảo trì hệ thống và cập nhật tính năng",
-    enabled: false,
-  },
-  {
-    id: "reports",
-    title: "Reports",
-    vietnamese: "Báo cáo",
-    description: "Weekly and monthly performance reports",
-    vietnameseDescription: "Báo cáo hiệu suất hàng tuần và hàng tháng",
-    enabled: true,
-  },
-]
+interface NotificationSetting {
+  id: string;
+  title: string;
+  vietnamese: string;
+  description: string;
+  vietnameseDescription: string;
+  enabled: boolean;
+}
 
 export default function NotificationsPage() {
-  const [selectedFilter, setSelectedFilter] = useState("all")
-  const [settings, setSettings] = useState(notificationSettings)
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const [selectedFilter, setSelectedFilter] = useState("all");
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [settings, setSettings] = useState<NotificationSetting[]>([]);
+  const [stats, setStats] = useState({ total: 0, unread: 0, highPriority: 0, today: 0 });
+  const [loading, setLoading] = useState(true);
 
-  const filteredNotifications = notifications.filter((notification) => {
-    if (selectedFilter === "all") return true
-    if (selectedFilter === "unread") return !notification.read
-    if (selectedFilter === "high") return notification.priority === "high"
-    return notification.type === selectedFilter
-  })
+  useEffect(() => {
+    console.log("Auth state:", { isLoading, isAuthenticated, userId: user?.id, user: user });
+    if (isLoading) {
+      console.log("Waiting for auth to complete...");
+      return;
+    }
+    if (!isAuthenticated || !user?.id) {
+      console.error("Authentication failed:", { isAuthenticated, userId: user?.id });
+      toast.error("Please log in to view notifications / Vui lòng đăng nhập để xem thông báo");
+      return;
+    }
 
-  const unreadCount = notifications.filter((n) => !n.read).length
+    console.log("Logged in userId:", user.id);
 
-  const handleSettingChange = (settingId: string, enabled: boolean) => {
-    setSettings(settings.map((setting) => (setting.id === settingId ? { ...setting, enabled } : setting)))
-  }
+    async function loadData() {
+      setLoading(true);
+      try {
+        const data = await fetchNotifications(user.id, {
+          status: selectedFilter === "unread" ? "unread" : undefined,
+          type: selectedFilter !== "all" && selectedFilter !== "unread" && selectedFilter !== "high" ? selectedFilter : undefined,
+          priority: selectedFilter === "high" ? "high" : undefined,
+        });
+        console.log("Notifications fetched:", data);
+        setNotifications(data);
 
-  const markAsRead = (notificationId: number) => {
-    // In a real app, this would update the backend
-    console.log(`Marking notification ${notificationId} as read`)
-  }
+        const statsData = await getNotificationStats(user.id);
+        console.log("Stats fetched:", statsData);
+        setStats(statsData);
 
-  const markAllAsRead = () => {
-    // In a real app, this would update the backend
-    console.log("Marking all notifications as read")
-  }
+        const { data: settingsData, error: settingsError } = await supabase
+          .from("notification_settings")
+          .select("*")
+          .eq("user_id", user.id);
+        if (settingsError) {
+          console.error("Error fetching settings:", settingsError);
+          throw settingsError;
+        }
+        console.log("Settings fetched:", settingsData);
+        if (settingsData) {
+          setSettings(
+            settingsData.map((s: any) => ({
+              id: s.type,
+              title: {
+                appointments: "Appointment Reminders",
+                new_contacts: "New Contacts",
+                pipeline_changes: "Pipeline Updates",
+                system_updates: "System Updates",
+                reports: "Reports",
+              }[s.type] || s.type,
+              vietnamese: {
+                appointments: "Nhắc nhở cuộc hẹn",
+                new_contacts: "Liên hệ mới",
+                pipeline_changes: "Cập nhật quy trình",
+                system_updates: "Cập nhật hệ thống",
+                reports: "Báo cáo",
+              }[s.type] || s.type,
+              description: `Notifications for ${s.type}`,
+              vietnameseDescription: `Thông báo cho ${s.type}`,
+              enabled: s.enabled,
+            }))
+          );
+        }
+      } catch (error) {
+        console.error("Error loading notifications:", error);
+        toast.error("Failed to load notifications / Không thể tải thông báo");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadData();
+
+    const unsubscribe = setupRealtimeNotifications(user.id, (newNotification) => {
+      console.log("New notification received:", newNotification);
+      setNotifications((prev) => [newNotification, ...prev]);
+      setStats((prev) => ({
+        ...prev,
+        total: prev.total + 1,
+        unread: !newNotification.read_at ? prev.unread + 1 : prev.unread,
+        today: newNotification.time.includes(new Date().toISOString().split("T")[0]) ? prev.today + 1 : prev.today,
+        highPriority: newNotification.priority === "high" ? prev.highPriority + 1 : prev.highPriority,
+      }));
+      toast.success("New notification received / Nhận được thông báo mới");
+    });
+
+    return () => unsubscribe();
+  }, [user?.id, selectedFilter, isAuthenticated, isLoading]);
+
+  const handleSettingChange = async (settingId: string, enabled: boolean) => {
+    if (!user?.id) {
+      console.error("No user ID for settings update");
+      toast.error("No user ID available / Không có ID người dùng");
+      return;
+    }
+    try {
+      await updateNotificationSettings(user.id, settingId, enabled);
+      setSettings(settings.map((setting) => (setting.id === settingId ? { ...setting, enabled } : setting)));
+      toast.success("Settings updated / Cài đặt đã cập nhật");
+    } catch (error) {
+      console.error("Error updating settings:", error);
+      toast.error("Failed to update settings / Không thể cập nhật cài đặt");
+    }
+  };
+
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+      await markAsRead(notificationId);
+      setNotifications(notifications.map((n) => (n.id === notificationId ? { ...n, read_at: new Date().toISOString() } : n)));
+      setStats((prev) => ({ ...prev, unread: prev.unread - 1 }));
+      toast.success("Marked as read / Đã đánh dấu đã đọc");
+    } catch (error) {
+      console.error("Error marking as read:", error);
+      toast.error("Failed to mark as read / Không thể đánh dấu đã đọc");
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (!user?.id) {
+      console.error("No user ID for mark all as read");
+      toast.error("No user ID available / Không có ID người dùng");
+      return;
+    }
+    try {
+      await markAllAsRead(user.id);
+      setNotifications(notifications.map((n) => ({ ...n, read_at: new Date().toISOString() })));
+      setStats((prev) => ({ ...prev, unread: 0 }));
+      toast.success("All marked as read / Đã đánh dấu tất cả đã đọc");
+    } catch (error) {
+      console.error("Error marking all as read:", error);
+      toast.error("Failed to mark all as read / Không thể đánh dấu tất cả");
+    }
+  };
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case "appointment":
-        return Calendar
+        return Calendar;
       case "contact":
-        return User
+        return User;
       case "pipeline":
-        return Bell
+        return Bell;
       case "system":
-        return Settings
+        return Settings;
       default:
-        return Bell
+        return Bell;
     }
-  }
+  };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "high":
-        return "bg-red-100 text-red-800"
+        return "bg-red-100 text-red-800";
       case "medium":
-        return "bg-yellow-100 text-yellow-800"
+        return "bg-yellow-100 text-yellow-800";
       case "low":
-        return "bg-blue-100 text-blue-800"
+        return "bg-blue-100 text-blue-800";
       default:
-        return "bg-gray-100 text-gray-800"
+        return "bg-gray-100 text-gray-800";
     }
-  }
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Notifications</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight">Notifications / Thông báo</h1>
+          <div className="text-muted-foreground">
             Quản lý thông báo và cài đặt
-            {unreadCount > 0 && (
+            {stats.unread > 0 && (
               <Badge variant="destructive" className="ml-2">
-                {unreadCount} unread
+                {stats.unread} unread / chưa đọc
               </Badge>
             )}
-          </p>
+          </div>
         </div>
-        {unreadCount > 0 && (
-          <Button onClick={markAllAsRead}>
+        {stats.unread > 0 && (
+          <Button onClick={handleMarkAllAsRead}>
             <Check className="mr-2 h-4 w-4" />
             Mark All Read / Đánh dấu đã đọc
           </Button>
@@ -191,7 +234,6 @@ export default function NotificationsPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        {/* Notifications List */}
         <div className="md:col-span-2 space-y-4">
           <Card>
             <CardHeader>
@@ -214,82 +256,75 @@ export default function NotificationsPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {filteredNotifications.map((notification) => {
-                  const IconComponent = getNotificationIcon(notification.type)
+              {loading ? (
+                <p>Loading...</p>
+              ) : (
+                <div className="space-y-4">
+                  {notifications.map((notification) => {
+                    const IconComponent = getNotificationIcon(notification.type);
 
-                  return (
-                    <div
-                      key={notification.id}
-                      className={`flex items-start gap-4 p-4 rounded-lg border ${
-                        !notification.read ? "bg-blue-50 border-blue-200" : "bg-white"
-                      }`}
-                    >
-                      <div className="flex-shrink-0">
-                        {notification.avatar ? (
-                          <Avatar className="h-10 w-10">
-                            <AvatarImage src={notification.avatar || "/placeholder.svg"} />
-                            <AvatarFallback>
-                              {notification.contactName
-                                ?.split(" ")
-                                .map((n) => n[0])
-                                .join("")}
-                            </AvatarFallback>
-                          </Avatar>
-                        ) : (
+                    return (
+                      <div
+                        key={notification.id}
+                        className={`flex items-start gap-4 p-4 rounded-lg border ${
+                          !notification.read_at ? "bg-blue-50 border-blue-200" : "bg-white"
+                        }`}
+                      >
+                        <div className="flex-shrink-0">
                           <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
                             <IconComponent className="h-5 w-5 text-gray-600" />
                           </div>
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-medium text-sm">{notification.title}</h4>
-                          <Badge className={getPriorityColor(notification.priority)}>{notification.priority}</Badge>
-                          {!notification.read && <div className="h-2 w-2 bg-blue-600 rounded-full"></div>}
                         </div>
-                        <p className="text-xs text-muted-foreground mb-1">{notification.vietnamese}</p>
-                        <p className="text-sm text-gray-700 mb-2">{notification.message}</p>
-                        <p className="text-xs text-muted-foreground mb-2">{notification.vietnameseMessage}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">{notification.time}</span>
-                          <div className="flex gap-2">
-                            {notification.contactId && (
-                              <Button variant="ghost" size="sm" onClick={() => (window.location.href = `/contacts`)}>
-                                View Contact / Xem liên hệ
-                              </Button>
-                            )}
-                            {!notification.read && (
-                              <Button variant="ghost" size="sm" onClick={() => markAsRead(notification.id)}>
-                                <Check className="h-3 w-3" />
-                              </Button>
-                            )}
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="font-medium text-sm">{notification.payload.en.title}</h4>
+                            <Badge className={getPriorityColor(notification.priority)}>{notification.priority}</Badge>
+                            {!notification.read_at && <span className="h-2 w-2 bg-blue-600 rounded-full inline-block"></span>}
+                          </div>
+                          <div className="text-xs text-muted-foreground mb-1">{notification.payload.vi.title}</div>
+                          <div className="text-sm text-gray-700 mb-2">{notification.payload.en.message}</div>
+                          <div className="text-xs text-muted-foreground mb-2">{notification.payload.vi.message}</div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">{notification.time}</span>
+                            <div className="flex gap-2">
+                              {notification.contact_id && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => (window.location.href = `/contacts/${notification.contact_id}`)}
+                                >
+                                  View Contact / Xem liên hệ
+                                </Button>
+                              )}
+                              {!notification.read_at && (
+                                <Button variant="ghost" size="sm" onClick={() => handleMarkAsRead(notification.id)}>
+                                  <Check className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
+                    );
+                  })}
+                  {notifications.length === 0 && (
+                    <div className="text-center py-8">
+                      <Bell className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-500">No notifications found / Không tìm thấy thông báo</p>
                     </div>
-                  )
-                })}
-
-                {filteredNotifications.length === 0 && (
-                  <div className="text-center py-8">
-                    <Bell className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No notifications found</p>
-                    <p className="text-sm text-muted-foreground">Không tìm thấy thông báo</p>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Notification Settings */}
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Notification Settings</CardTitle>
-              <CardDescription>Cài đặt thông báo</CardDescription>
+              <CardTitle>Notification Settings / Cài đặt thông báo</CardTitle>
+              <CardDescription>Manage your notification preferences / Quản lý tùy chọn thông báo</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -313,33 +348,28 @@ export default function NotificationsPage() {
             </CardContent>
           </Card>
 
-          {/* Quick Stats */}
           <Card>
             <CardHeader>
-              <CardTitle>Notification Stats</CardTitle>
-              <CardDescription>Thống kê thông báo</CardDescription>
+              <CardTitle>Notification Stats / Thống kê thông báo</CardTitle>
+              <CardDescription>Quick overview of your notifications / Tổng quan nhanh về thông báo</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-sm">Total / Tổng</span>
-                  <span className="font-medium">{notifications.length}</span>
+                  <span className="font-medium">{stats.total}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm">Unread / Chưa đọc</span>
-                  <span className="font-medium text-red-600">{unreadCount}</span>
+                  <span className="font-medium text-red-600">{stats.unread}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm">High Priority / Ưu tiên cao</span>
-                  <span className="font-medium text-yellow-600">
-                    {notifications.filter((n) => n.priority === "high").length}
-                  </span>
+                  <span className="font-medium text-yellow-600">{stats.highPriority}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm">Today / Hôm nay</span>
-                  <span className="font-medium text-blue-600">
-                    {notifications.filter((n) => n.time.includes("2024-01-15")).length}
-                  </span>
+                  <span className="font-medium text-blue-600">{stats.today}</span>
                 </div>
               </div>
             </CardContent>
@@ -347,5 +377,5 @@ export default function NotificationsPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

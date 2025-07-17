@@ -956,26 +956,78 @@ const fetchOptions = async () => {
       </div>
       <div className="space-y-2">
         <Label htmlFor="assigned_to">Assigned To / Phụ trách</Label>
+
+
+
         <Select
           value={newContact.assigned_to || "unassigned"}
-          onValueChange={(value) =>
-            setNewContact({ ...newContact, assigned_to: value === "unassigned" ? "" : value })
-          }
+          onValueChange={async (value) => {
+            const originalContact = { ...newContact }; // Lưu bản sao trước khi cập nhật
+            const newAssigned = value === "unassigned" ? null : value;
+            setNewContact({ ...newContact, assigned_to: newAssigned });
+            if (isEdit && newContact.id) {
+              const { error } = await supabase
+                .from("contacts")
+                .update({ assigned_to: newAssigned })
+                .eq("id", newContact.id);
+              if (error) {
+                toast.error("Cập nhật người phụ trách thất bại: " + error.message);
+              } else {
+                toast.success("Đã cập nhật người phụ trách thành công");
+                if (user?.id) {
+                  const oldUser = profileOptions.find((p) => p.id === originalContact.assigned_to)?.full_name || "Unassigned";
+                  const newUser = profileOptions.find((p) => p.id === newAssigned)?.full_name || "Unassigned";
+                  await fetch("/api/activity/log", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      user_id: user.id,
+                      action_type: "assigned_changed",
+                      target_id: newContact.id,
+                      target_type: "contact",
+                      detail: {
+                        contactName: originalContact.name || "Unknown", // Sử dụng name từ bản gốc
+                        from: oldUser,
+                        to: newUser,
+                        userName: user.full_name,
+                        changedAt: new Date().toISOString(),
+                      },
+                    }),
+                  });
+                }
+              }
+            }
+          }}
         >
           <SelectTrigger>
-            <SelectValue placeholder="Chọn nhân sự phụ trách..." />
+            <SelectValue placeholder="Chọn người phụ trách..." />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
             {profileOptions
-              .filter((profile) => profile.role === "sales" || profile.id === user?.id)
+              .filter((profile) => {
+                if (user?.role === "admin") return true;
+                if (user?.role === "manager") {
+                  return profile.id === user.id || (profile.manager_id === user.id && profile.role === "sales");
+                }
+                if (user?.role === "sales") {
+                  return profile.id === user.id || (profile.role === "sales" && profile.manager_id === user.manager_id);
+                }
+                return false;
+              })
               .map((profile) => (
                 <SelectItem key={profile.id} value={profile.id}>
-                  {profile.full_name} {profile.role === "sales" ? "(Sales)" : "(Manager)"}
+                  {profile.full_name} 
+                  {profile.role === "admin" ? "(Admin)" : 
+                   profile.role === "manager" ? "(Manager)" : 
+                   profile.role === "sales" ? "(Sales)" : ""}
                 </SelectItem>
               ))}
           </SelectContent>
         </Select>
+
+
+
       </div>
       <div className="space-y-2">
         <Label>Tags / Nhãn</Label>

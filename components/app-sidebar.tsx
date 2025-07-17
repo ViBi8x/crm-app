@@ -101,12 +101,12 @@ export function AppSidebar() {
     //   url: "/analytics",
     //   icon: BarChart3,
     // },
-    // {
-    //   title: "Notifications",
-    //   vietnamese: "Thông báo",
-    //   url: "/notifications",
-    //   icon: Bell,
-    // },
+    {
+      title: "Notifications",
+      vietnamese: "Thông báo",
+      url: "/notifications",
+      icon: Bell,
+    },
     {
       title: "Activity Log",
       vietnamese: "Nhật ký hoạt động",
