@@ -215,7 +215,7 @@ export default function NotificationsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Notifications / Thông báo</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Thông báo</h1>
           <div className="text-muted-foreground">
             Quản lý thông báo và cài đặt
             {stats.unread > 0 && (
@@ -238,7 +238,7 @@ export default function NotificationsPage() {
           <Card>
             <CardHeader>
               <div className="flex justify-between items-center">
-                <CardTitle>Recent Notifications / Thông báo gần đây</CardTitle>
+                <CardTitle>Thông báo gần đây</CardTitle>
                 <Select value={selectedFilter} onValueChange={setSelectedFilter}>
                   <SelectTrigger className="w-48">
                     <SelectValue />
@@ -261,47 +261,49 @@ export default function NotificationsPage() {
               ) : (
                 <div className="space-y-4">
                   {notifications.map((notification) => {
-                    const IconComponent = getNotificationIcon(notification.type);
+  const IconComponent = getNotificationIcon(notification.type);
 
-                    return (
-                      <div
-                        key={notification.id}
-                        className={`flex items-start gap-4 p-4 rounded-lg border ${
-                          !notification.read_at ? "bg-blue-50 border-blue-200" : "bg-white"
-                        }`}
-                      >
-                        <div className="flex-shrink-0">
-                          <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-                            <IconComponent className="h-5 w-5 text-gray-600" />
-                          </div>
-                        </div>
+  return (
+    <div
+      key={notification.id}
+      className={`flex items-start gap-4 p-4 rounded-lg border ${
+        !notification.read_at ? "bg-blue-50 border-blue-200" : "bg-white"
+      }`}
+    >
+      <div className="flex-shrink-0">
+        <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
+          <IconComponent className="h-5 w-5 text-gray-600" />
+        </div>
+      </div>
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h4 className="font-medium text-sm">{notification.payload.en.title}</h4>
-                            <Badge className={getPriorityColor(notification.priority)}>{notification.priority}</Badge>
-                            {!notification.read_at && <span className="h-2 w-2 bg-blue-600 rounded-full inline-block"></span>}
-                          </div>
-                          <div className="text-xs text-muted-foreground mb-1">{notification.payload.vi.title}</div>
-                          <div className="text-sm text-gray-700 mb-2">{notification.payload.en.message}</div>
-                          <div className="text-xs text-muted-foreground mb-2">{notification.payload.vi.message}</div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-muted-foreground">{notification.time}</span>
-                            <div className="flex gap-2">
-                              {notification.contact_id && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => (window.location.href = `/contacts/${notification.contact_id}`)}
-                                >
-                                  View Contact / Xem liên hệ
-                                </Button>
-                              )}
-                              {!notification.read_at && (
-                                <Button variant="ghost" size="sm" onClick={() => handleMarkAsRead(notification.id)}>
-                                  <Check className="h-3 w-3" />
-                                </Button>
-                              )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <h4 className="font-medium text-sm">
+            {notification.payload?.vi?.title || 'Thông báo không có tiêu đề'}
+          </h4>
+          <Badge className={getPriorityColor(notification.priority)}>{notification.priority}</Badge>
+          {!notification.read_at && <span className="h-2 w-2 bg-blue-600 rounded-full inline-block"></span>}
+        </div>
+        <div className="text-xs text-muted-foreground mb-1">
+          {notification.payload?.vi?.message || 'Không có nội dung'}
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">{notification.time}</span>
+          <div className="flex gap-2">
+            {notification.contact_id && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => (window.location.href = `/contacts/${notification.contact_id}`)}
+              >
+                Xem liên hệ
+              </Button>
+            )}
+            {!notification.read_at && (
+              <Button variant="ghost" size="sm" onClick={() => handleMarkAsRead(notification.id)}>
+                <Check className="h-3 w-3" />
+              </Button>
+            )}
                             </div>
                           </div>
                         </div>
@@ -323,8 +325,8 @@ export default function NotificationsPage() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Notification Settings / Cài đặt thông báo</CardTitle>
-              <CardDescription>Manage your notification preferences / Quản lý tùy chọn thông báo</CardDescription>
+              <CardTitle>Cài đặt thông báo</CardTitle>
+              <CardDescription>Quản lý tùy chọn thông báo</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -350,8 +352,8 @@ export default function NotificationsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Notification Stats / Thống kê thông báo</CardTitle>
-              <CardDescription>Quick overview of your notifications / Tổng quan nhanh về thông báo</CardDescription>
+              <CardTitle>Thống kê thông báo</CardTitle>
+              <CardDescription>Tổng quan nhanh về thông báo</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
