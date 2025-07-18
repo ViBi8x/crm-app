@@ -1175,133 +1175,137 @@ const handleUpdateContact = async () => {
             {filteredContacts.length === 0 && (
               <div className="text-center text-gray-400">Không tìm thấy liên hệ phù hợp.</div>
             )}
-            {filteredContacts.map((contact) => (
-              <div
-                key={contact.id}
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+            
+{filteredContacts.map((contact) => (
+  <div
+    key={contact.id}
+    className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+  >
+    <div className="flex items-center space-x-4">
+      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+        <User className="h-5 w-5 text-blue-600" />
+      </div>
+      <div>
+        <h3 className="font-medium">{contact.name}</h3>
+        <div className="flex items-center gap-4 text-sm text-gray-500">
+          <span className="flex items-center gap-1">
+            <Mail className="h-3 w-3" />
+            {contact.email}
+          </span>
+          <span className="flex items-center gap-1">
+            <Phone className="h-3 w-3" />
+            {contact.phone}
+          </span>
+          <span className="flex items-center gap-1">
+            <Building className="h-3 w-3" />
+            {contact.company}
+          </span>
+        </div>
+      </div>
+    </div>
+    <div className="flex items-center gap-2">
+      <Badge className={getLifeStageColor(contact.life_stage)}>
+        {LIFE_STAGE_OPTIONS.find((l) => l.value === contact.life_stage)?.label ||
+          contact.life_stage}
+      </Badge>
+      <Badge
+        className={
+          contact.assigned_to
+            ? "bg-green-100 text-green-800"
+            : "bg-gray-200 text-gray-600"
+        }
+      >
+        <UserCheck className="mr-1 h-3 w-3" />
+        {contact.assigned_to
+          ? profileOptions.find((p) => p.id === contact.assigned_to)?.full_name ||
+            "Đang gán..."
+          : "Not Assigned"}
+      </Badge>
+      <div className="flex gap-1">
+        <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
+          <Eye className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => handleEditContact(contact)}>
+          <Edit className="h-4 w-4" />
+        </Button>
+        {user?.role === "admin" && (
+          <AlertDialog
+            open={deleteDialog.open}
+            onOpenChange={(open) => setDeleteDialog({ ...deleteDialog, open })}
+          >
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => openDeleteDialog(contact)}
+                title="Xóa liên hệ"
               >
-                <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <User className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium">{contact.name}</h3>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <Mail className="h-3 w-3" />
-                        {contact.email}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Phone className="h-3 w-3" />
-                        {contact.phone}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Building className="h-3 w-3" />
-                        {contact.company}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge className={getLifeStageColor(contact.life_stage)}>
-                    {LIFE_STAGE_OPTIONS.find((l) => l.value === contact.life_stage)?.label ||
-                      contact.life_stage}
-                  </Badge>
-                  <Badge
-                    className={
-                      contact.assigned_to
-                        ? "bg-green-100 text-green-800"
-                        : "bg-gray-200 text-gray-600"
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  <span className="flex items-center gap-2 text-red-600">
+                    <Trash2 className="h-5 w-5" />
+                    Xóa liên hệ
+                  </span>
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {deleteDialog.historyCount > 0 ? (
+                    <>
+                      Liên hệ này còn <b>{deleteDialog.historyCount}</b> lịch sử liên hệ. Để xóa
+                      liên hệ, bạn phải xóa tất cả lịch sử liên hệ này trước.
+                      <br />
+                      <b>Bạn có muốn xóa toàn bộ lịch sử liên hệ và xóa liên hệ này không?</b>
+                    </>
+                  ) : (
+                    <>
+                      Are you sure you want to delete this contact? This action cannot be undone.
+                      <br />
+                      Bạn có chắc chắn muốn xóa liên hệ này? Hành động này không thể hoàn tác.
+                    </>
+                  )}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  onClick={() => setDeleteDialog({ ...deleteDialog, open: false })}
+                >
+                  Cancel / Hủy
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={deleteDialog.loading}
+                  onClick={async () => {
+                    setDeleteDialog((d) => ({ ...d, loading: true }));
+                    if (deleteDialog.historyCount > 0) {
+                      await supabase
+                        .from("contact_history")
+                        .delete()
+                        .eq("contact_id", deleteDialog.contact!.id);
                     }
-                  >
-                    <UserCheck className="mr-1 h-3 w-3" />
-                    {contact.assigned_to
-                      ? profileOptions.find((p) => p.id === contact.assigned_to)?.full_name ||
-                        "Đang gán..."
-                      : "Not Assigned"}
-                  </Badge>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleEditContact(contact)}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <AlertDialog
-                      open={deleteDialog.open}
-                      onOpenChange={(open) => setDeleteDialog({ ...deleteDialog, open })}
-                    >
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openDeleteDialog(contact)}
-                          title="Xóa liên hệ"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>
-                            <span className="flex items-center gap-2 text-red-600">
-                              <Trash2 className="h-5 w-5" />
-                              Xóa liên hệ
-                            </span>
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            {deleteDialog.historyCount > 0 ? (
-                              <>
-                                Liên hệ này còn <b>{deleteDialog.historyCount}</b> lịch sử liên hệ. Để xóa
-                                liên hệ, bạn phải xóa tất cả lịch sử liên hệ này trước.
-                                <br />
-                                <b>Bạn có muốn xóa toàn bộ lịch sử liên hệ và xóa liên hệ này không?</b>
-                              </>
-                            ) : (
-                              <>
-                                Are you sure you want to delete this contact? This action cannot be undone.
-                                <br />
-                                Bạn có chắc chắn muốn xóa liên hệ này? Hành động này không thể hoàn tác.
-                              </>
-                            )}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel
-                            onClick={() => setDeleteDialog({ ...deleteDialog, open: false })}
-                          >
-                            Cancel / Hủy
-                          </AlertDialogCancel>
-                          <AlertDialogAction
-                            disabled={deleteDialog.loading}
-                            onClick={async () => {
-                              setDeleteDialog((d) => ({ ...d, loading: true }));
-                              if (deleteDialog.historyCount > 0) {
-                                await supabase
-                                  .from("contact_history")
-                                  .delete()
-                                  .eq("contact_id", deleteDialog.contact!.id);
-                              }
-                              await proceedDeleteContact(deleteDialog.contact!);
-                              setDeleteDialog({
-                                open: false,
-                                contact: null,
-                                loading: false,
-                                historyCount: 0,
-                              });
-                            }}
-                          >
-                            {deleteDialog.historyCount > 0
-                              ? "Xóa hết lịch sử và liên hệ"
-                              : "Delete / Xóa"}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                </div>
-              </div>
-            ))}
+                    await proceedDeleteContact(deleteDialog.contact!);
+                    setDeleteDialog({
+                      open: false,
+                      contact: null,
+                      loading: false,
+                      historyCount: 0,
+                    });
+                  }}
+                >
+                  {deleteDialog.historyCount > 0
+                    ? "Xóa hết lịch sử và liên hệ"
+                    : "Delete / Xóa"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+    </div>
+  </div>
+))}
+            
           </div>
         </CardContent>
       </Card>
