@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { useAuth } from "@/components/auth-provider"
+import { toast } from "sonner" // Thay bằng import từ sonner
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -49,6 +51,7 @@ const stages = [
 ]
 
 export default function PipelinePage() {
+  const { user } = useAuth();
   const [columns, setColumns] = useState<any>({})
   const [loading, setLoading] = useState(true)
   const [moveDialog, setMoveDialog] = useState({
@@ -63,7 +66,6 @@ export default function PipelinePage() {
     open: boolean,
     contact: any | null
   }>({ open: false, contact: null })
-
 
   // profilesMap: { user_id: full_name }
   const [profilesMap, setProfilesMap] = useState<{ [key: string]: string }>({})
@@ -175,63 +177,45 @@ export default function PipelinePage() {
   }
 
   // Xác nhận chuyển stage (update Supabase)
-const confirmMove = async () => {
-  const { contact, fromColumn, toColumn } = moveDialog;
-  if (!contact || !contact.id) return;
+  const confirmMove = async () => {
+    const { contact, fromColumn, toColumn } = moveDialog;
+    if (!contact || !contact.id) return;
 
-  const { error } = await supabase
-    .from('contacts')
-    .update({ life_stage: toColumn })
-    .eq('id', contact.id);
+    const response = await fetch("/api/activity/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: user?.id,
+        action_type: "pipeline_moved",
+        target_id: contact.id,
+        target_type: "contact",
+        detail: {
+          contactName: contact.name,
+          from: fromColumn,
+          to: toColumn,
+          userName: user?.full_name || "",
+        },
+      }),
+    });
+    const result = await response.json();
 
-  if (error) {
-    setMoveDialog({ ...moveDialog, isOpen: false });
-    return;
-  }
-
-  // Lấy user từ localStorage (hoặc context, hoặc prop nếu có)
-  let user = null;
-  try {
-    user = JSON.parse(localStorage.getItem("user") || "{}");
-  } catch {}
-  if (!user?.id) {
-    alert("Không xác định được user thực hiện thao tác. Vui lòng đăng nhập lại!");
-    setMoveDialog({ ...moveDialog, isOpen: false });
-    return;
-  }
-
-  const res = await fetch("/api/activity/log", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_id: user.id, // luôn truyền đúng id uuid
-      action_type: "pipeline_moved",
-      target_id: contact.id,
-      target_type: "contact",
-      detail: {
-        contactName: contact.name,
-        from: fromColumn,
-        to: toColumn,
-        userName: user.full_name || "",
-      }
-    })
-  });
-  const resJson = await res.json();
-  console.log("Log pipeline response", res.status, resJson);
-
-  setColumns((prev: any) => {
-    const sourceContacts = prev[fromColumn].contacts.filter((c: any) => c.id !== contact.id);
-    const destContacts = [...prev[toColumn].contacts, { ...contact, life_stage: toColumn }];
-    return {
-      ...prev,
-      [fromColumn]: { ...prev[fromColumn], contacts: sourceContacts },
-      [toColumn]: { ...prev[toColumn], contacts: destContacts },
+    if (response.ok && result.success) {
+      // Cập nhật state chỉ khi API thành công
+      setColumns((prev: any) => {
+        const sourceContacts = prev[fromColumn].contacts.filter((c: any) => c.id !== contact.id);
+        const destContacts = [...prev[toColumn].contacts, { ...contact, life_stage: toColumn }];
+        return {
+          ...prev,
+          [fromColumn]: { ...prev[fromColumn], contacts: sourceContacts },
+          [toColumn]: { ...prev[toColumn], contacts: destContacts },
+        };
+      });
+      toast.success("Di chuyển liên hệ thành công!"); // Sử dụng toast.success từ sonner
+      setMoveDialog({ isOpen: false, contact: null, fromColumn: "", toColumn: "" });
+    } else {
+      toast.error(`Lỗi di chuyển liên hệ: ${result.error || "Unknown error"}`);
     }
-  });
-  setMoveDialog({ isOpen: false, contact: null, fromColumn: "", toColumn: "" });
-};
-
-
+  };
 
   const getColumnColor = (columnId: string) => {
     const stage = stages.find((s) => s.id === columnId)
@@ -272,20 +256,13 @@ const confirmMove = async () => {
                         {columns[column.id]?.contacts?.map((contact: any, index: number) => (
                           <Draggable key={contact.id} draggableId={contact.id} index={index}>
                             {(provided, snapshot) => (
-                              // <Card
-                              //   ref={provided.innerRef}
-                              //   {...provided.draggableProps}
-                              //   {...provided.dragHandleProps}
-                              //   className={`cursor-move ${snapshot.isDragging ? "shadow-lg rotate-2" : ""}`}
-                              // >
-                                <Card
-                                  ref={provided.innerRef}
-                                  {...provided.draggableProps}
-                                  {...provided.dragHandleProps}
-                                  className={`cursor-move ${snapshot.isDragging ? "shadow-lg rotate-2" : ""} hover:ring-2 hover:ring-primary`}
-                                  onClick={() => setDetailDialog({ open: true, contact })}
-                                >
-
+                              <Card
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                {...provided.dragHandleProps}
+                                className={`cursor-move ${snapshot.isDragging ? "shadow-lg rotate-2" : ""} hover:ring-2 hover:ring-primary`}
+                                onClick={() => setDetailDialog({ open: true, contact })}
+                              >
                                 <CardContent className="p-4">
                                   <div className="space-y-3">
                                     <div className="flex items-center gap-3">
@@ -402,83 +379,79 @@ const confirmMove = async () => {
       </Dialog>
 
       {/*Dialog hiển thị chi tiết contact*/}
-<Dialog open={detailDialog.open} onOpenChange={open => setDetailDialog({ open, contact: open ? detailDialog.contact : null })}>
-  <DialogContent className="max-w-lg ">
-    <DialogHeader >
-      <DialogTitle className="text-center text-blue-400">Chi tiết liên hệ</DialogTitle>
-      <DialogDescription className="text-center">Xem thông tin đầy đủ của liên hệ</DialogDescription>
-    </DialogHeader>
-    {detailDialog.contact && (
-      <div className="space-y-4">
-        {/* Avatar, tên, công ty */}
-        <div className="flex items-center gap-3">
-          <Avatar className="h-12 w-12">
-            <AvatarImage src={detailDialog.contact.avatar || "/placeholder.svg"} />
-            <AvatarFallback>
-              {detailDialog.contact.name?.split(" ").map((n: string) => n[0]).join("")}
-            </AvatarFallback>
-          </Avatar>
-          <div>
-            <p className="font-semibold text-lg">{detailDialog.contact.name}</p>
-            <p className="text-sm text-muted-foreground">{detailDialog.contact.company}</p>
-          </div>
-        </div>
+      <Dialog open={detailDialog.open} onOpenChange={open => setDetailDialog({ open, contact: open ? detailDialog.contact : null })}>
+        <DialogContent className="max-w-lg ">
+          <DialogHeader >
+            <DialogTitle className="text-center text-blue-400">Chi tiết liên hệ</DialogTitle>
+            <DialogDescription className="text-center">Xem thông tin đầy đủ của liên hệ</DialogDescription>
+          </DialogHeader>
+          {detailDialog.contact && (
+            <div className="space-y-4">
+              {/* Avatar, tên, công ty */}
+              <div className="flex items-center gap-3">
+                <Avatar className="h-12 w-12">
+                  <AvatarImage src={detailDialog.contact.avatar || "/placeholder.svg"} />
+                  <AvatarFallback>
+                    {detailDialog.contact.name?.split(" ").map((n: string) => n[0]).join("")}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-semibold text-lg">{detailDialog.contact.name}</p>
+                  <p className="text-sm text-muted-foreground">{detailDialog.contact.company}</p>
+                </div>
+              </div>
 
-        {/* Thông tin chi tiết */}
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <div className="flex items-center gap-2">
-            <Mail className="h-4 w-4 text-blue-400" /> {detailDialog.contact.email}
-          </div>
-          <div className="flex items-center gap-2">
-            <Phone className="h-4 w-4 text-blue-400" /> {detailDialog.contact.phone}
-          </div>
-          <div className="flex items-center gap-2 ">
-            <MessageCircle className="h-4 w-4 text-blue-400" />Zalo: {detailDialog.contact.zalo}
-          </div>
-          {/* Tag */}
-          <div className="flex flex-wrap gap-2">
-            <Tag className="h-4 w-4 text-blue-400" />
-            {(detailDialog.contact.tags || []).map((tag: string) => (
-              <Badge key={tag} variant="outline">{tag}</Badge>
-            ))}
-          </div>
-          <hr className="my-2 border-gray-200" />
+              {/* Thông tin chi tiết */}
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-blue-400" /> {detailDialog.contact.email}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Phone className="h-4 w-4 text-blue-400" /> {detailDialog.contact.phone}
+                </div>
+                <div className="flex items-center gap-2 ">
+                  <MessageCircle className="h-4 w-4 text-blue-400" />Zalo: {detailDialog.contact.zalo}
+                </div>
+                {/* Tag */}
+                <div className="flex flex-wrap gap-2">
+                  <Tag className="h-4 w-4 text-blue-400" />
+                  {(detailDialog.contact.tags || []).map((tag: string) => (
+                    <Badge key={tag} variant="outline">{tag}</Badge>
+                  ))}
+                </div>
+                <hr className="my-2 border-gray-200" />
 
-          <div className="flex items-center gap-2 lg:col-span-2">
-            <Building className="h-4 w-4 text-blue-400" />Công ty: {detailDialog.contact.company}
-          </div>
-          <div className="flex items-center gap-2 lg:col-span-2">
-            <Users className="h-4 w-4 text-blue-400" />Quy mô: {detailDialog.contact.company_size}
-          </div>
-          <div className="flex items-center gap-2 lg:col-span-2">
-            <Activity className="h-4 w-4 text-blue-400" />Ngành nghề: {detailDialog.contact.industry}
-          </div>
-          <div className="flex items-center gap-2 lg:col-span-2">
-            <MapPin className="h-4 w-4 text-blue-400" />Địa chỉ: {detailDialog.contact.address}
-          </div>
-          <hr className="my-2 border-gray-200" />
-          <div className="flex items-center gap-2 lg:col-span-2">
-            <User className="h-4 w-4 text-blue-400" /> Người phụ trách: {detailDialog.contact.assignedTo}
-          </div>
-          <div className="flex items-center gap-2 lg:col-span-2">
-            <Calendar className="h-4 w-4 text-blue-400" />Lịch hẹn sắp tới:
-            {detailDialog.contact.next_appointment_at
-              ? new Date(detailDialog.contact.next_appointment_at).toLocaleString("vi-VN")
-              : <span className="italic text-gray-400">Chưa có</span>
-            }
-          </div>
-        </div>
-
-        
-      </div>
-    )}
-    <DialogFooter>
-      <Button variant="outline" onClick={() => setDetailDialog({ open: false, contact: null })}>Đóng</Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
-
-
+                <div className="flex items-center gap-2 lg:col-span-2">
+                  <Building className="h-4 w-4 text-blue-400" />Công ty: {detailDialog.contact.company}
+                </div>
+                <div className="flex items-center gap-2 lg:col-span-2">
+                  <Users className="h-4 w-4 text-blue-400" />Quy mô: {detailDialog.contact.company_size}
+                </div>
+                <div className="flex items-center gap-2 lg:col-span-2">
+                  <Activity className="h-4 w-4 text-blue-400" />Ngành nghề: {detailDialog.contact.industry}
+                </div>
+                <div className="flex items-center gap-2 lg:col-span-2">
+                  <MapPin className="h-4 w-4 text-blue-400" />Địa chỉ: {detailDialog.contact.address}
+                </div>
+                <hr className="my-2 border-gray-200" />
+                <div className="flex items-center gap-2 lg:col-span-2">
+                  <User className="h-4 w-4 text-blue-400" /> Người phụ trách: {detailDialog.contact.assignedTo}
+                </div>
+                <div className="flex items-center gap-2 lg:col-span-2">
+                  <Calendar className="h-4 w-4 text-blue-400" />Lịch hẹn sắp tới:
+                  {detailDialog.contact.next_appointment_at
+                    ? new Date(detailDialog.contact.next_appointment_at).toLocaleString("vi-VN")
+                    : <span className="italic text-gray-400">Chưa có</span>
+                  }
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailDialog({ open: false, contact: null })}>Đóng</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

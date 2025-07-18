@@ -384,94 +384,93 @@ const fetchOptions = async () => {
   };
 
   // Handlers
-  const handleAddContact = async () => {
-    const { email, phone } = newContact;
-    if (!email && !phone) {
-      toast.error("Bạn phải nhập ít nhất email hoặc số điện thoại!");
-      return;
-    }
+const handleAddContact = async () => {
+  const { email, phone } = newContact;
+  if (!email && !phone) {
+    toast.error("Bạn phải nhập ít nhất email hoặc số điện thoại!");
+    return;
+  }
 
-    const orQuery = [];
-    if (email) orQuery.push(`email.eq.${email}`);
-    if (phone) orQuery.push(`phone.eq.${phone}`);
-    if (orQuery.length > 0) {
-      const { data: dupContacts, error } = await supabase
-        .from("contacts")
-        .select("id, name, email, phone")
-        .or(orQuery.join(","));
-
-      if (error) {
-        toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
-        return;
-      }
-
-      if (dupContacts?.length) {
-        let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
-          email && phone ? " hoặc" : ""
-        }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
-        toast.error(msg);
-        return;
-      }
-    }
-
-    const insertData = {
-      ...newContact,
-      assigned_to: newContact.assigned_to === "unassigned" ? null : newContact.assigned_to,
-      created_by: user?.id,
-    };
-
-    const { data, error } = await supabase
+  const orQuery = [];
+  if (email) orQuery.push(`email.eq.${email}`);
+  if (phone) orQuery.push(`phone.eq.${phone}`);
+  if (orQuery.length > 0) {
+    const { data: dupContacts, error } = await supabase
       .from("contacts")
-      .insert([insertData])
-      .select()
-      .single();
-
+      .select("id, name, email, phone")
+      .or(orQuery.join(","));
     if (error) {
-      toast.error("Lỗi khi thêm liên hệ: " + error.message);
+      toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
       return;
     }
-
-    toast.success("Đã thêm liên hệ thành công");
-    setIsAddDialogOpen(false);
-    setNewContact({
-      name: "",
-      email: "",
-      phone: "",
-      zalo: "",
-      company: "",
-      company_size: "",
-      industry: "",
-      data_source: "",
-      life_stage: "lead",
-      assigned_to: user?.id || "",
-      position: "",
-      address: "",
-      next_appointment_at: undefined,
-      tags: [],
-      notes: "",
-    });
-    fetchContacts();
-
-    if (data && user?.id) {
-      await fetch("/api/activity/log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user.id,
-          action_type: "contact_added",
-          target_id: data.id,
-          target_type: "contact",
-          detail: {
-            contactName: data.name,
-            contactEmail: data.email,
-            userName: user.full_name,
-          },
-        }),
-      });
+    if (dupContacts?.length) {
+      let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
+        email && phone ? " hoặc" : ""
+      }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
+      toast.error(msg);
+      return;
     }
+  }
+
+  const insertData = {
+    ...newContact,
+    assigned_to: newContact.assigned_to === "unassigned" ? null : newContact.assigned_to,
+    created_by: user?.id,
+    // Loại bỏ last_updated_by khỏi đây, để API xử lý
   };
 
-  const handleSaveAppointmentDate = async () => {
+  const { data, error } = await supabase
+    .from("contacts")
+    .insert([insertData])
+    .select()
+    .single();
+
+  if (error) {
+    toast.error("Lỗi khi thêm liên hệ: " + error.message);
+    return;
+  }
+
+  toast.success("Đã thêm liên hệ thành công");
+  setIsAddDialogOpen(false);
+  setNewContact({
+    name: "",
+    email: "",
+    phone: "",
+    zalo: "",
+    company: "",
+    company_size: "",
+    industry: "",
+    data_source: "",
+    life_stage: "lead",
+    assigned_to: user?.id || "",
+    position: "",
+    address: "",
+    next_appointment_at: undefined,
+    tags: [],
+    notes: "",
+  });
+  fetchContacts();
+
+  if (data && user?.id) {
+    await fetch("/api/activity/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: user.id,
+        action_type: "contact_added",
+        target_id: data.id,
+        target_type: "contact",
+        detail: {
+          contactName: data.name,
+          contactEmail: data.email,
+          userName: user.full_name,
+        },
+      }),
+    });
+  }
+};
+
+    const handleSaveAppointmentDate = async () => {
     if (!selectedContact || !appointmentDate) return;
 
     const utcISOString = new Date(appointmentDate).toISOString();
@@ -547,95 +546,94 @@ const fetchOptions = async () => {
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdateContact = async () => {
-    if (!selectedContact) return;
+  // Thay đổi tại dòng 580-631, trong hàm handleUpdateContact
+const handleUpdateContact = async () => {
+  if (!selectedContact) return;
 
-    const { email, phone, assigned_to } = newContact;
-    const orQuery = [];
-    if (email) orQuery.push(`email.eq.${email}`);
-    if (phone) orQuery.push(`phone.eq.${phone}`);
-    if (orQuery.length > 0) {
-      const { data: dupContacts, error } = await supabase
-        .from("contacts")
-        .select("id, name, email, phone")
-        .or(orQuery.join(","));
-
-      if (error) {
-        toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
-        return;
-      }
-
-      const filteredDup = (dupContacts || []).filter((c) => c.id !== selectedContact.id);
-      if (filteredDup.length > 0) {
-        let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
-          email && phone ? " hoặc" : ""
-        }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
-        toast.error(msg);
-        return;
-      }
-    }
-
-    const oldData = { ...selectedContact };
-    const updateData = {
-      ...newContact,
-      tags: newContact.tags,
-      assigned_to: assigned_to === "unassigned" ? null : assigned_to,
-    };
-    const { error } = await supabase
+  const { email, phone, assigned_to, life_stage } = newContact;
+  const orQuery = [];
+  if (email) orQuery.push(`email.eq.${email}`);
+  if (phone) orQuery.push(`phone.eq.${phone}`);
+  if (orQuery.length > 0) {
+    const { data: dupContacts, error } = await supabase
       .from("contacts")
-      .update(updateData)
-      .eq("id", selectedContact.id);
-
+      .select("id, name, email, phone")
+      .or(orQuery.join(","));
     if (error) {
-      toast.error("Lỗi cập nhật liên hệ: " + error.message);
+      toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
       return;
     }
-
-    toast.success("Cập nhật liên hệ thành công");
-    setIsEditDialogOpen(false);
-    setSelectedContact({ ...selectedContact, ...updateData });
-    fetchContacts();
-
-    if (user?.id) {
-      const changedFields = Object.keys(newContact).filter(
-        (k) => newContact[k] !== oldData[k]
-      );
-      const detail: any = {
-        contactName: oldData.name,
-        fieldsChanged: changedFields,
-        userName: user.full_name,
-        changedAt: new Date().toISOString(),
-      };
-
-      // Ghi log chi tiết nếu assigned_to thay đổi
-      if (oldData.assigned_to !== newContact.assigned_to) {
-        const oldUser =
-          oldData.assigned_to
-            ? profileOptions.find((p) => p.id === oldData.assigned_to)?.full_name || "Unassigned"
-            : "Unassigned";
-        const newUser =
-          newContact.assigned_to
-            ? profileOptions.find((p) => p.id === newContact.assigned_to)?.full_name || "Unassigned"
-            : "Unassigned";
-        detail.assignedFrom = oldUser;
-        detail.assignedTo = newUser;
-      }
-
-      await fetch("/api/activity/log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user.id,
-          action_type: oldData.assigned_to !== newContact.assigned_to
-            ? "assigned_changed"
-            : "contact_updated",
-          target_id: selectedContact.id,
-          target_type: "contact",
-          detail,
-        }),
-      });
+    const filteredDup = (dupContacts || []).filter((c) => c.id !== selectedContact.id);
+    if (filteredDup.length > 0) {
+      let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
+        email && phone ? " hoặc" : ""
+      }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
+      toast.error(msg);
+      return;
     }
+  }
+
+  const oldData = { ...selectedContact };
+  const updateData = {
+    ...newContact,
+    tags: newContact.tags,
+    assigned_to: assigned_to === "unassigned" ? null : assigned_to,
+    // Loại bỏ last_updated_by khỏi đây, để API xử lý
   };
+  const { error } = await supabase
+    .from("contacts")
+    .update(updateData)
+    .eq("id", selectedContact.id);
+
+  if (error) {
+    toast.error("Lỗi cập nhật liên hệ: " + error.message);
+    return;
+  }
+
+  toast.success("Cập nhật liên hệ thành công");
+  setIsEditDialogOpen(false);
+  setSelectedContact({ ...selectedContact, ...updateData });
+  fetchContacts();
+
+  if (user?.id) {
+    const changedFields = Object.keys(newContact).filter(
+      (k) => newContact[k] !== oldData[k]
+    );
+    const detail: any = {
+      contactName: oldData.name,
+      fieldsChanged: changedFields,
+      userName: user.full_name,
+      changedAt: new Date().toISOString(),
+    };
+
+    if (oldData.assigned_to !== newContact.assigned_to) {
+      const oldUser =
+        oldData.assigned_to
+          ? profileOptions.find((p) => p.id === oldData.assigned_to)?.full_name || "Unassigned"
+          : "Unassigned";
+      const newUser =
+        newContact.assigned_to
+          ? profileOptions.find((p) => p.id === newContact.assigned_to)?.full_name || "Unassigned"
+          : "Unassigned";
+      detail.assignedFrom = oldUser;
+      detail.assignedTo = newUser;
+    }
+
+    await fetch("/api/activity/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: user.id,
+        action_type: oldData.assigned_to !== newContact.assigned_to
+          ? "assigned_changed"
+          : "contact_updated",
+        target_id: selectedContact.id,
+        target_type: "contact",
+        detail,
+      }),
+    });
+  }
+};
 
   const openDeleteDialog = async (contact: Contact) => {
     const { count } = await supabase
@@ -1428,60 +1426,56 @@ const fetchOptions = async () => {
                       </span>
                     </div>
                   </div>
-                  <div className="space-y-2 w-max">
-                    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                      <Flag className="h-4 w-4 text-blue-400" />Life Stage
-                    </Label>
-                    <Select
-                      value={selectedContact.life_stage}
-                      onValueChange={async (value) => {
-                        const oldLifeStage = selectedContact.life_stage;
-                        const { error } = await supabase
-                          .from("contacts")
-                          .update({ life_stage: value })
-                          .eq("id", selectedContact.id);
-                        if (!error) {
-                          toast.success("Cập nhật Life Stage thành công!");
-                          fetchContacts();
-                          setSelectedContact({ ...selectedContact, life_stage: value });
-
-                          if (user?.id) {
-                            await fetch("/api/activity/log", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                user_id: user.id,
-                                action_type: "life_stage_changed",
-                                target_id: selectedContact.id,
-                                target_type: "contact",
-                                detail: {
-                                  contactName: selectedContact.name,
-                                  from: oldLifeStage,
-                                  to: value,
-                                  userName: user.full_name,
-                                },
-                              }),
-                            });
-                          }
-                        } else {
-                          toast.error("Lỗi cập nhật Life Stage: " + error.message);
-                        }
-                      }}
-                    >
-                      <SelectTrigger className={getLifeStageColor(selectedContact.life_stage)}>
-                        <SelectValue>
-                          {LIFE_STAGE_OPTIONS.find((l) => l.value === selectedContact.life_stage)?.label}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LIFE_STAGE_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  
+<div className="space-y-2 w-max">
+  <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
+    <Flag className="h-4 w-4 text-blue-400" />Life Stage
+  </Label>
+  <Select
+    value={selectedContact.life_stage}
+    onValueChange={async (value) => {
+      const oldLifeStage = selectedContact.life_stage;
+      const response = await fetch("/api/activity/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user?.id,
+          action_type: "life_stage_changed",
+          target_id: selectedContact.id,
+          target_type: "contact",
+          detail: {
+            contactName: selectedContact.name,
+            from: oldLifeStage,
+            to: value,
+            userName: user?.full_name,
+          },
+        }),
+      });
+      const result = await response.json();
+      if (response.ok) {
+        toast.success("Cập nhật Life Stage thành công!");
+        fetchContacts();
+        setSelectedContact({ ...selectedContact, life_stage: value });
+      } else {
+        toast.error("Lỗi cập nhật Life Stage: " + (result.error || "Unknown error"));
+      }
+    }}
+  >
+    <SelectTrigger className={getLifeStageColor(selectedContact.life_stage)}>
+      <SelectValue>
+        {LIFE_STAGE_OPTIONS.find((l) => l.value === selectedContact.life_stage)?.label}
+      </SelectValue>
+    </SelectTrigger>
+    <SelectContent>
+      {LIFE_STAGE_OPTIONS.map((opt) => (
+        <SelectItem key={opt.value} value={opt.value}>
+          {opt.label}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  </Select>
+</div>
+                 
                   <div className="space-y-2 w-max">
                     <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
                       <UserCheck className="h-4 w-4 text-blue-400" />Người phụ trách
