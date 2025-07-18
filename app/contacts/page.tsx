@@ -198,6 +198,7 @@ export default function ContactsPage() {
   const [showDateEdit, setShowDateEdit] = useState(false);
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentDuration, setAppointmentDuration] = useState(30);
+  const [appointmentNote, setAppointmentNote] = useState("");
   const [companySizeOptions, setCompanySizeOptions] = useState<any[]>([]);
   const [industryOptions, setIndustryOptions] = useState<any[]>([]);
   const [dataSourceOptions, setDataSourceOptions] = useState<any[]>([]);
@@ -470,69 +471,70 @@ const handleAddContact = async () => {
   }
 };
 
-    const handleSaveAppointmentDate = async () => {
-    if (!selectedContact || !appointmentDate) return;
+const handleSaveAppointmentDate = async () => {
+  if (!selectedContact || !appointmentDate) return;
 
-    const utcISOString = new Date(appointmentDate).toISOString();
-    const duration_min = Number(appointmentDuration) || 30;
-    const newStart = new Date(utcISOString);
-    const newEnd = new Date(newStart.getTime() + duration_min * 60 * 1000);
+  const utcISOString = new Date(appointmentDate).toISOString();
+  const duration_min = Number(appointmentDuration) || 30;
+  const newStart = new Date(utcISOString);
+  const newEnd = new Date(newStart.getTime() + duration_min * 60 * 1000);
 
-    const { data: appointments, error: fetchError } = await supabase
-      .from("appointments")
-      .select("id, scheduled_at, duration_min")
-      .eq("created_by", user?.id);
+  const { data: appointments, error: fetchError } = await supabase
+    .from("appointments")
+    .select("id, scheduled_at, duration_min")
+    .eq("created_by", user?.id);
 
-    if (fetchError) {
-      toast.error("Lỗi kiểm tra trùng lịch: " + fetchError.message);
-      return;
-    }
+  if (fetchError) {
+    toast.error("Lỗi kiểm tra trùng lịch: " + fetchError.message);
+    return;
+  }
 
-    const isConflict = appointments.some((apt) => {
-      const existStart = new Date(apt.scheduled_at);
-      const existDuration = Number(apt.duration_min) || 30;
-      const existEnd = new Date(existStart.getTime() + existDuration * 60 * 1000);
-      return newStart < existEnd && existStart < newEnd;
+  const isConflict = appointments.some((apt) => {
+    const existStart = new Date(apt.scheduled_at);
+    const existDuration = Number(apt.duration_min) || 30;
+    const existEnd = new Date(existStart.getTime() + existDuration * 60 * 1000);
+    return newStart < existEnd && existStart < newEnd;
+  });
+
+  if (isConflict) {
+    toast.error("Bạn đã có lịch hẹn khác bị trùng trong khoảng thời gian này!");
+    return;
+  }
+
+  const { error } = await supabase
+    .from("contacts")
+    .update({ next_appointment_at: utcISOString })
+    .eq("id", selectedContact.id);
+
+  if (!error) {
+    setSelectedContact({
+      ...selectedContact,
+      next_appointment_at: utcISOString,
     });
+    setShowDateEdit(false);
 
-    if (isConflict) {
-      toast.error("Bạn đã có lịch hẹn khác bị trùng trong khoảng thời gian này!");
-      return;
-    }
+    const { error: insertError } = await supabase.from("appointments").insert([
+      {
+        contact_id: selectedContact.id,
+        title: `Lịch hẹn với ${selectedContact.name}`,
+        type: "meeting",
+        scheduled_at: utcISOString,
+        status: "scheduled",
+        created_by: user?.id,
+        duration_min,
+        note: appointmentNote, // Thêm ghi chú vào đây
+      },
+    ]);
 
-    const { error } = await supabase
-      .from("contacts")
-      .update({ next_appointment_at: utcISOString })
-      .eq("id", selectedContact.id);
-
-    if (!error) {
-      setSelectedContact({
-        ...selectedContact,
-        next_appointment_at: utcISOString,
-      });
-      setShowDateEdit(false);
-
-      const { error: insertError } = await supabase.from("appointments").insert([
-        {
-          contact_id: selectedContact.id,
-          title: `Lịch hẹn với ${selectedContact.name}`,
-          type: "meeting",
-          scheduled_at: utcISOString,
-          status: "scheduled",
-          created_by: user?.id,
-          duration_min,
-        },
-      ]);
-
-      if (insertError) {
-        toast.error("Lỗi khi thêm vào appointments: " + insertError.message);
-      } else {
-        toast.success("Đã lưu và thêm lịch hẹn vào Calendar!");
-      }
+    if (insertError) {
+      toast.error("Lỗi khi thêm vào appointments: " + insertError.message);
     } else {
-      toast.error("Lỗi khi lưu lịch hẹn: " + error.message);
+      toast.success("Đã lưu và thêm lịch hẹn vào Calendar!");
     }
-  };
+  } else {
+    toast.error("Lỗi khi lưu lịch hẹn: " + error.message);
+  }
+};
 
   const handleViewContact = (contact: Contact) => {
     setSelectedContact(contact);
@@ -690,73 +692,171 @@ const handleUpdateContact = async () => {
     }
   };
 
-  const handleAddActivity = async () => {
-    if (!selectedContact || !user?.id) {
-      toast.error("Không xác định được user hoặc contact!");
-      return;
-    }
 
-    const insertData: any = {
-      contact_id: selectedContact.id,
-      user_id: user.id,
-      type: newActivity.type,
-      note: newActivity.note,
-      action_time: new Date(`${newActivity.date}T${newActivity.time}`),
-      attachment_url: null,
-    };
+const handleAddActivity = async () => {
+  if (!selectedContact || !user?.id) {
+    toast.error("Không xác định được user hoặc contact!");
+    return;
+  }
 
-    if ((newActivity.type === "call" || newActivity.type === "meeting") && newActivity.duration) {
-      insertData.duration_min = Number(newActivity.duration);
-    }
+  const actionTime = new Date(`${newActivity.date}T${newActivity.time}:00Z`).toISOString();
+  const currentTime = new Date().toISOString();
 
-    if (newActivity.location) {
-      insertData.location = newActivity.location;
-    }
-
-    if (newActivity.type === "task" && newActivity.dueDate) {
-      insertData.due_date = newActivity.dueDate;
-    }
-
-    const { error } = await supabase.from("contact_history").insert([insertData]);
-    if (error) {
-      toast.error("Lỗi thêm hoạt động: " + error.message);
-      return;
-    }
-
-    toast.success("Đã thêm hoạt động");
-    setIsAddActivityDialogOpen(false);
-    setNewActivity({
-      type: "call",
-      note: "",
-      date: new Date().toISOString().split("T")[0],
-      time: new Date().toTimeString().slice(0, 5),
-      duration: "",
-      location: "",
-      dueDate: "",
-      file: null,
-    });
-    fetchContactActivities(selectedContact.id);
-
-    await fetch("/api/activity/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: user.id,
-        action_type: "contact_activity_added",
-        target_id: selectedContact.id,
-        target_type: "contact",
-        detail: {
-          contactName: selectedContact.name,
-          activityType: newActivity.type,
-          note: newActivity.note,
-          action_time: insertData.action_time,
-          duration: insertData.duration_min,
-          location: insertData.location,
-          userName: user.full_name,
-        },
-      }),
-    });
+  const insertData: any = {
+    contact_id: selectedContact.id,
+    user_id: user.id,
+    type: newActivity.type,
+    note: newActivity.note,
+    action_time: actionTime,
+    attachment_url: null,
   };
+
+  if ((newActivity.type === "call" || newActivity.type === "meeting") && newActivity.duration) {
+    insertData.duration_min = Number(newActivity.duration);
+  }
+
+  if (newActivity.location) {
+    insertData.location = newActivity.location;
+  }
+
+  if (newActivity.type === "task" && newActivity.dueDate) {
+    insertData.due_date = newActivity.dueDate;
+  }
+
+  // Thêm vào contact_history
+  const { error: historyError } = await supabase.from("contact_history").insert([insertData]);
+  if (historyError) {
+    toast.error("Lỗi thêm hoạt động: " + historyError.message);
+    return;
+  }
+
+  // Nếu là sự kiện tương lai, thêm vào appointments
+  if (actionTime >= currentTime) {
+    const { error: aptError } = await supabase.from("appointments").insert({
+      contact_id: selectedContact.id,
+      title: `${newActivity.type} với ${selectedContact.name}`,
+      type: newActivity.type,
+      scheduled_at: actionTime,
+      duration_min: insertData.duration_min || 30,
+      status: "scheduled",
+      note: newActivity.note,
+      created_by: user.id,
+      attendees: [user.id],
+      location: newActivity.location || "",
+    });
+
+    if (aptError) {
+      toast.error("Lỗi khi đồng bộ với Calendar: " + aptError.message);
+    } else {
+      toast.success("Đã thêm hoạt động và đồng bộ với Calendar!");
+    }
+  } else {
+    toast.success("Đã thêm hoạt động thành công!");
+  }
+
+  // Reset form và cập nhật danh sách
+  setIsAddActivityDialogOpen(false);
+  setNewActivity({
+    type: "call",
+    note: "",
+    date: new Date().toISOString().split("T")[0],
+    time: new Date().toTimeString().slice(0, 5),
+    duration: "",
+    location: "",
+    dueDate: "",
+    file: null,
+  });
+  fetchContactActivities(selectedContact.id);
+
+  // Log activity
+  await fetch("/api/activity/log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: user.id,
+      action_type: "contact_activity_added",
+      target_id: selectedContact.id,
+      target_type: "contact",
+      detail: {
+        contactName: selectedContact.name,
+        activityType: newActivity.type,
+        note: newActivity.note,
+        action_time: actionTime,
+        duration: insertData.duration_min,
+        location: insertData.location,
+        userName: user.full_name,
+      },
+    }),
+  });
+};
+
+  // const handleAddActivity = async () => {
+  //   if (!selectedContact || !user?.id) {
+  //     toast.error("Không xác định được user hoặc contact!");
+  //     return;
+  //   }
+
+  //   const insertData: any = {
+  //     contact_id: selectedContact.id,
+  //     user_id: user.id,
+  //     type: newActivity.type,
+  //     note: newActivity.note,
+  //     action_time: new Date(`${newActivity.date}T${newActivity.time}`),
+  //     attachment_url: null,
+  //   };
+
+  //   if ((newActivity.type === "call" || newActivity.type === "meeting") && newActivity.duration) {
+  //     insertData.duration_min = Number(newActivity.duration);
+  //   }
+
+  //   if (newActivity.location) {
+  //     insertData.location = newActivity.location;
+  //   }
+
+  //   if (newActivity.type === "task" && newActivity.dueDate) {
+  //     insertData.due_date = newActivity.dueDate;
+  //   }
+
+  //   const { error } = await supabase.from("contact_history").insert([insertData]);
+  //   if (error) {
+  //     toast.error("Lỗi thêm hoạt động: " + error.message);
+  //     return;
+  //   }
+
+  //   toast.success("Đã thêm hoạt động");
+  //   setIsAddActivityDialogOpen(false);
+  //   setNewActivity({
+  //     type: "call",
+  //     note: "",
+  //     date: new Date().toISOString().split("T")[0],
+  //     time: new Date().toTimeString().slice(0, 5),
+  //     duration: "",
+  //     location: "",
+  //     dueDate: "",
+  //     file: null,
+  //   });
+  //   fetchContactActivities(selectedContact.id);
+
+  //   await fetch("/api/activity/log", {
+  //     method: "POST",
+  //     headers: { "Content-Type": "application/json" },
+  //     body: JSON.stringify({
+  //       user_id: user.id,
+  //       action_type: "contact_activity_added",
+  //       target_id: selectedContact.id,
+  //       target_type: "contact",
+  //       detail: {
+  //         contactName: selectedContact.name,
+  //         activityType: newActivity.type,
+  //         note: newActivity.note,
+  //         action_time: insertData.action_time,
+  //         duration: insertData.duration_min,
+  //         location: insertData.location,
+  //         userName: user.full_name,
+  //       },
+  //     }),
+  //   });
+  // };
 
   const handleDeleteActivity = async (activityId: string) => {
     const { error } = await supabase.from("contact_history").delete().eq("id", activityId);
@@ -1305,7 +1405,7 @@ const handleUpdateContact = async () => {
     </div>
   </div>
 ))}
-            
+
           </div>
         </CardContent>
       </Card>
@@ -1558,7 +1658,7 @@ const handleUpdateContact = async () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-lg font-semibold text-green-600">
                     <Clock className="h-5 w-5" />
-                    <span>Lịch sử liên hệ</span>
+                    <span>Kế hoạch Chăm Sóc Khách hàng</span>
                   </div>
                   <Dialog open={isAddActivityDialogOpen} onOpenChange={setIsAddActivityDialogOpen}>
                     <DialogTrigger asChild>
@@ -1569,17 +1669,15 @@ const handleUpdateContact = async () => {
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
                       <DialogHeader>
-                        <DialogTitle>Add New Activity / Thêm hoạt động mới</DialogTitle>
+                        <DialogTitle>Thêm hoạt động mới với khách</DialogTitle>
                         <DialogDescription>
-                          Log a new interaction with this contact
-                          <br />
                           Ghi lại tương tác mới với liên hệ này
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4">
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label htmlFor="activity-type">Activity Type / Loại hoạt động</Label>
+                            <Label htmlFor="activity-type">Loại hoạt động</Label>
                             <Select
                               value={newActivity.type}
                               onValueChange={(value) => setNewActivity({ ...newActivity, type: value })}
@@ -1597,7 +1695,7 @@ const handleUpdateContact = async () => {
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="activity-date">Date / Ngày</Label>
+                            <Label htmlFor="activity-date">Ngày</Label>
                             <Input
                               id="activity-date"
                               type="date"
@@ -1608,7 +1706,7 @@ const handleUpdateContact = async () => {
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label htmlFor="activity-time">Time / Giờ</Label>
+                            <Label htmlFor="activity-time">Giờ</Label>
                             <Input
                               id="activity-time"
                               type="time"
@@ -1618,7 +1716,7 @@ const handleUpdateContact = async () => {
                           </div>
                           {(newActivity.type === "call" || newActivity.type === "meeting") && (
                             <div className="space-y-2">
-                              <Label htmlFor="duration">Duration (minutes) / Thời lượng (phút)</Label>
+                              <Label htmlFor="duration">Thời lượng (phút)</Label>
                               <Input
                                 id="duration"
                                 type="number"
@@ -1633,7 +1731,7 @@ const handleUpdateContact = async () => {
                         </div>
                         {(newActivity.type === "meeting" || newActivity.type === "call") && (
                           <div className="space-y-2">
-                            <Label htmlFor="location">Location / Địa điểm</Label>
+                            <Label htmlFor="location">Địa điểm</Label>
                             <Input
                               id="location"
                               value={newActivity.location}
@@ -1646,7 +1744,7 @@ const handleUpdateContact = async () => {
                         )}
                         {newActivity.type === "task" && (
                           <div className="space-y-2">
-                            <Label htmlFor="due-date">Due Date / Hạn hoàn thành</Label>
+                            <Label htmlFor="due-date">Hạn hoàn thành</Label>
                             <Input
                               id="due-date"
                               type="date"
@@ -1658,7 +1756,7 @@ const handleUpdateContact = async () => {
                           </div>
                         )}
                         <div className="space-y-2">
-                          <Label htmlFor="activity-note">Note / Ghi chú</Label>
+                          <Label htmlFor="activity-note">Ghi chú</Label>
                           <Textarea
                             id="activity-note"
                             value={newActivity.note}
@@ -1668,7 +1766,7 @@ const handleUpdateContact = async () => {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="file-upload">Attach File / Đính kèm tệp (Optional)</Label>
+                          <Label htmlFor="file-upload">Đính kèm tệp (Optional)</Label>
                           <div className="flex items-center gap-2">
                             <Input
                               id="file-upload"
@@ -1873,39 +1971,47 @@ const handleUpdateContact = async () => {
       </Dialog>
 
       {/* Edit Appointment Dialog */}
-      <Dialog open={showDateEdit} onOpenChange={setShowDateEdit}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cập nhật lịch hẹn sắp tới</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Label htmlFor="edit-appointment">Chọn ngày & giờ hẹn mới</Label>
-            <Input
-              id="edit-appointment"
-              type="datetime-local"
-              value={appointmentDate}
-              onChange={(e) => setAppointmentDate(e.target.value)}
-            />
-            <Label htmlFor="edit-appointment-duration">Thời lượng (phút)</Label>
-            <Input
-              id="edit-appointment-duration"
-              type="number"
-              min={1}
-              max={480}
-              value={appointmentDuration}
-              onChange={(e) => setAppointmentDuration(Number(e.target.value))}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDateEdit(false)}>
-              Hủy
-            </Button>
-            <Button onClick={handleSaveAppointmentDate} disabled={!appointmentDate}>
-              Lưu
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+<Dialog open={showDateEdit} onOpenChange={setShowDateEdit}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>Cập nhật lịch hẹn sắp tới</DialogTitle>
+    </DialogHeader>
+    <div className="space-y-4">
+      <Label htmlFor="edit-appointment">Chọn ngày & giờ hẹn mới</Label>
+      <Input
+        id="edit-appointment"
+        type="datetime-local"
+        value={appointmentDate}
+        onChange={(e) => setAppointmentDate(e.target.value)}
+      />
+      <Label htmlFor="edit-appointment-duration">Thời lượng (phút)</Label>
+      <Input
+        id="edit-appointment-duration"
+        type="number"
+        min={1}
+        max={480}
+        value={appointmentDuration}
+        onChange={(e) => setAppointmentDuration(Number(e.target.value))}
+      />
+      <Label htmlFor="edit-appointment-note">Ghi chú</Label>
+      <Textarea
+        id="edit-appointment-note"
+        value={appointmentNote}
+        onChange={(e) => setAppointmentNote(e.target.value)}
+        placeholder="Nhập ghi chú cho lịch hẹn..."
+        rows={3}
+      />
+    </div>
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setShowDateEdit(false)}>
+        Hủy
+      </Button>
+      <Button onClick={handleSaveAppointmentDate} disabled={!appointmentDate}>
+        Lưu
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
       {/* Edit Contact Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
