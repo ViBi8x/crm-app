@@ -90,10 +90,10 @@ interface Contact {
   assigned_to?: string;
   position?: string;
   address?: string;
-  next_appointment_at?: string;
   tags: string[];
   notes?: string;
   created_by?: string;
+  latestAppointment?: string; // Dùng để hiển thị, nhưng không cập nhật vào DB
 }
 
 interface Activity {
@@ -119,11 +119,10 @@ const LIFE_STAGE_OPTIONS = [
 
 const ACTIVITY_TYPES = [
   { value: "call", label: "Phone Call / Cuộc gọi", emoji: "📞" },
-  { value: "email", label: "Email / Thư điện tử", emoji: "📧" },
+  { value: "email", label: "Email / Gửi email", emoji: "📧" },
   { value: "meeting", label: "Meeting / Cuộc họp", emoji: "🤝" },
-  { value: "zalo", label: "Zalo Message / Tin nhắn Zalo", emoji: "💬" },
-  { value: "note", label: "Note / Ghi chú", emoji: "📝" },
-  { value: "task", label: "Task / Nhiệm vụ", emoji: "✅" },
+  { value: "warranty", label: "Warranty / Bảo hành", emoji: "🔧" },
+  { value: "repair", label: "Repair / Sửa chữa", emoji: "🛠️" },
 ];
 
 // Utility Functions
@@ -144,7 +143,7 @@ const getLifeStageColor = (stage: string): string => {
 
 const formatTimestamp = (ts?: string): string => {
   if (!ts) return "";
-  const date = new Date(ts);
+  const date = toZonedTime(new Date(ts), "Asia/Ho_Chi_Minh");
   return date.toLocaleString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
@@ -162,28 +161,14 @@ const toDatetimeLocal = (dtString?: string): string => {
   return local.toISOString().slice(0, 16);
 };
 
-const fetchNextAppointmentDuration = async (
-  contactId?: string,
-  scheduledAt?: string,
-): Promise<number> => {
-  if (!contactId || !scheduledAt) return 30;
-  const { data, error } = await supabase
-    .from("appointments")
-    .select("duration_min")
-    .eq("contact_id", contactId)
-    .eq("scheduled_at", scheduledAt)
-    .single();
-  return !error && data?.duration_min ? data.duration_min : 30;
-};
-
 const getActivityTypeInfo = (type: string) =>
   ACTIVITY_TYPES.find((t) => t.value === type) || { emoji: "❓", label: type };
 
 export default function ContactsPage() {
-  // State
   const { user } = useAuth();
   const [myManagedSales, setMyManagedSales] = useState<string[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [totalContactsCount, setTotalContactsCount] = useState(0); // Thêm state cho tổng số contact
   const [searchTerm, setSearchTerm] = useState("");
   const [lifeStageFilter, setLifeStageFilter] = useState("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -195,10 +180,6 @@ export default function ContactsPage() {
   const [tempNotes, setTempNotes] = useState("");
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
-  const [showDateEdit, setShowDateEdit] = useState(false);
-  const [appointmentDate, setAppointmentDate] = useState("");
-  const [appointmentDuration, setAppointmentDuration] = useState(30);
-  const [appointmentNote, setAppointmentNote] = useState("");
   const [companySizeOptions, setCompanySizeOptions] = useState<any[]>([]);
   const [industryOptions, setIndustryOptions] = useState<any[]>([]);
   const [dataSourceOptions, setDataSourceOptions] = useState<any[]>([]);
@@ -209,7 +190,6 @@ export default function ContactsPage() {
     loading: false,
     historyCount: 0,
   });
-
   const [newContact, setNewContact] = useState<Contact>({
     name: "",
     email: "",
@@ -223,23 +203,20 @@ export default function ContactsPage() {
     assigned_to: user?.id || "",
     position: "",
     address: "",
-    next_appointment_at: undefined,
     tags: [],
     notes: "",
   });
-
   const [newActivity, setNewActivity] = useState({
     type: "call",
     note: "",
-    date: new Date().toISOString().split("T")[0],
-    time: new Date().toTimeString().slice(0, 5),
+    action_time: toZonedTime(new Date(), "Asia/Ho_Chi_Minh").toISOString().slice(0, 16),
     duration: "",
     location: "",
     dueDate: "",
-    file: null as File | null,
   });
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
 
-  // Effects
   useEffect(() => {
     if (isViewDialogOpen && selectedContact?.id) {
       fetchContactActivities(selectedContact.id);
@@ -253,36 +230,35 @@ export default function ContactsPage() {
   useEffect(() => {
     fetchOptions();
     fetchContacts();
-  }, [user]);
+  }, [user, currentPage]);
 
-  // Data Fetching
-const fetchOptions = async () => {
-  const { data: appConfig } = await supabase
-    .from("app_config")
-    .select("*")
-    .eq("active", true);
-  setCompanySizeOptions(appConfig?.filter((i) => i.type === "company_size") || []);
-  setIndustryOptions(appConfig?.filter((i) => i.type === "industry") || []);
-  setDataSourceOptions(appConfig?.filter((i) => i.type === "data_source") || []);
+  const fetchOptions = async () => {
+    const { data: appConfig } = await supabase
+      .from("app_config")
+      .select("*")
+      .eq("active", true);
+    setCompanySizeOptions(appConfig?.filter((i) => i.type === "company_size") || []);
+    setIndustryOptions(appConfig?.filter((i) => i.type === "industry") || []);
+    setDataSourceOptions(appConfig?.filter((i) => i.type === "data_source") || []);
 
-  const { data: profiles, error: profilesError } = await supabase
-    .from("profiles")
-    .select("id, full_name, role, manager_id");
-  if (profilesError) {
-    toast.error("Lỗi khi lấy danh sách profiles: " + profilesError.message);
-    return;
-  }
-  setProfileOptions(profiles || []);
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, full_name, role, manager_id");
+    if (profilesError) {
+      toast.error("Lỗi khi lấy danh sách profiles: " + profilesError.message);
+      return;
+    }
+    setProfileOptions(profiles || []);
 
-  if (user?.role === "manager" && profiles) {
-    const mySales = profiles
-      .filter((p) => p.manager_id === user.id && p.role === "sales")
-      .map((p) => p.id);
-    setMyManagedSales(mySales);
-  } else {
-    setMyManagedSales([]);
-  }
-};
+    if (user?.role === "manager" && profiles) {
+      const mySales = profiles
+        .filter((p) => p.manager_id === user.id && p.role === "sales")
+        .map((p) => p.id);
+      setMyManagedSales(mySales);
+    } else {
+      setMyManagedSales([]);
+    }
+  };
 
   const fetchContacts = async () => {
     if (!user) {
@@ -291,250 +267,145 @@ const fetchOptions = async () => {
       return;
     }
 
-    const { data: myProfile, error: profileError } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("id", user.id)
+    let query = supabase.from("contacts").select("*", { count: "exact" }).order("id", { ascending: false });
+    const from = (currentPage - 1) * ITEMS_PER_PAGE;
+    const to = from + ITEMS_PER_PAGE - 1;
+
+    if (user.role === "sales") query = query.eq("assigned_to", user.id);
+    else if (user.role === "manager") query = query.in("assigned_to", [user.id, ...myManagedSales]);
+    // Admin không cần lọc
+
+    const { data: contactData, error: contactError, count } = await query.range(from, to);
+    if (contactError) {
+      toast.error("Lỗi khi lấy danh sách liên hệ: " + contactError.message);
+      setContacts([]);
+      return;
+    }
+
+    const contactIds = contactData.map((c) => c.id);
+    const { data: latestActivities } = await supabase
+      .from("contact_history")
+      .select("contact_id, action_time")
+      .in("contact_id", contactIds)
+      .order("action_time", { ascending: false })
+      .limit(1);
+    const latestAppointments = latestActivities.reduce((acc, curr) => {
+      acc[curr.contact_id] = curr.action_time;
+      return acc;
+    }, {} as { [key: string]: string });
+
+    const updatedContacts = contactData.map((contact) => ({
+      ...contact,
+      latestAppointment: latestAppointments[contact.id] || null,
+    }));
+    setContacts(updatedContacts || []);
+
+    // Cập nhật tổng số contact
+    if (count !== undefined) {
+      setTotalContactsCount(count);
+    }
+  };
+
+const fetchContactActivities = async (contactId: string) => {
+  setActivityLoading(true);
+  const { data, error } = await supabase
+    .from("contact_history")
+    .select(`
+      *,
+      profiles(full_name)
+    `)
+    .eq("contact_id", contactId)
+    .order("action_time", { ascending: false });
+  if (error) {
+    toast.error("Lỗi khi lấy lịch sử hoạt động: " + error.message);
+  }
+  setActivities(data || []);
+  setActivityLoading(false);
+};
+
+  const handleAddContact = async () => {
+    const { email, phone } = newContact;
+    if (!email && !phone) {
+      toast.error("Bạn phải nhập ít nhất email hoặc số điện thoại!");
+      return;
+    }
+
+    const orQuery = [];
+    if (email) orQuery.push(`email.eq.${email}`);
+    if (phone) orQuery.push(`phone.eq.${phone}`);
+    if (orQuery.length > 0) {
+      const { data: dupContacts, error } = await supabase
+        .from("contacts")
+        .select("id, name, email, phone")
+        .or(orQuery.join(","));
+      if (error) {
+        toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
+        return;
+      }
+      if (dupContacts?.length) {
+        let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
+          email && phone ? " hoặc" : ""
+        }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
+        toast.error(msg);
+        return;
+      }
+    }
+
+    const insertData = {
+      ...newContact,
+      assigned_to: newContact.assigned_to === "unassigned" ? null : newContact.assigned_to,
+      created_by: user?.id,
+    };
+
+    const { data, error } = await supabase
+      .from("contacts")
+      .insert([insertData])
+      .select()
       .single();
 
-    if (profileError || !myProfile) {
-      setContacts([]);
-      toast.error("Không thể lấy thông tin hồ sơ người dùng: " + (profileError?.message || "Unknown error"));
-      return;
-    }
-
-    if (myProfile.role === "admin") {
-      const { data, error } = await supabase.from("contacts").select("*");
-      if (error) {
-        toast.error("Lỗi khi lấy danh sách liên hệ: " + error.message);
-        setContacts([]);
-        return;
-      }
-      setContacts(data || []);
-      return;
-    }
-
-    if (myProfile.role === "manager") {
-      // Lấy danh sách ID của các sales do manager quản lý
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("manager_id", user.id)
-        .eq("role", "sales");
-
-      if (profilesError) {
-        toast.error("Lỗi khi lấy danh sách sales: " + profilesError.message);
-        setContacts([]);
-        return;
-      }
-
-      const salesIds = profiles?.map((p) => p.id) || [];
-      const responsibleIds = [user.id, ...salesIds];
-
-      // Truy vấn liên hệ với điều kiện assigned_to
-      const { data, error } = await supabase
-        .from("contacts")
-        .select("*")
-        .in("assigned_to", responsibleIds);
-
-      if (error) {
-        toast.error("Lỗi khi lấy danh sách liên hệ: " + error.message);
-        setContacts([]);
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        toast.info("Không tìm thấy liên hệ nào cho bạn hoặc nhân viên sales của bạn.");
-      }
-
-      setContacts(data || []);
-      return;
-    }
-
-    if (myProfile.role === "sales") {
-      const { data, error } = await supabase
-        .from("contacts")
-        .select("*")
-        .eq("assigned_to", user.id);
-
-      if (error) {
-        toast.error("Lỗi khi lấy danh sách liên hệ: " + error.message);
-        setContacts([]);
-        return;
-      }
-
-      setContacts(data || []);
-      return;
-    }
-
-    setContacts([]);
-  };
-
-  const fetchContactActivities = async (contactId: string) => {
-    setActivityLoading(true);
-    const { data, error } = await supabase
-      .from("contact_history")
-      .select("*")
-      .eq("contact_id", contactId)
-      .order("action_time", { ascending: false });
     if (error) {
-      toast.error("Lỗi khi lấy lịch sử hoạt động: " + error.message);
-    }
-    setActivities(data || []);
-    setActivityLoading(false);
-  };
-
-  // Handlers
-const handleAddContact = async () => {
-  const { email, phone } = newContact;
-  if (!email && !phone) {
-    toast.error("Bạn phải nhập ít nhất email hoặc số điện thoại!");
-    return;
-  }
-
-  const orQuery = [];
-  if (email) orQuery.push(`email.eq.${email}`);
-  if (phone) orQuery.push(`phone.eq.${phone}`);
-  if (orQuery.length > 0) {
-    const { data: dupContacts, error } = await supabase
-      .from("contacts")
-      .select("id, name, email, phone")
-      .or(orQuery.join(","));
-    if (error) {
-      toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
+      toast.error("Lỗi khi thêm liên hệ: " + error.message);
       return;
     }
-    if (dupContacts?.length) {
-      let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
-        email && phone ? " hoặc" : ""
-      }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
-      toast.error(msg);
-      return;
-    }
-  }
 
-  const insertData = {
-    ...newContact,
-    assigned_to: newContact.assigned_to === "unassigned" ? null : newContact.assigned_to,
-    created_by: user?.id,
-    // Loại bỏ last_updated_by khỏi đây, để API xử lý
+    toast.success("Đã thêm liên hệ thành công");
+    setIsAddDialogOpen(false);
+    setNewContact({
+      name: "",
+      email: "",
+      phone: "",
+      zalo: "",
+      company: "",
+      company_size: "",
+      industry: "",
+      data_source: "",
+      life_stage: "lead",
+      assigned_to: user?.id || "",
+      position: "",
+      address: "",
+      tags: [],
+      notes: "",
+    });
+    fetchContacts();
+
+    if (data && user?.id) {
+      await fetch("/api/activity/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          action_type: "contact_added",
+          target_id: data.id,
+          target_type: "contact",
+          detail: {
+            contactName: data.name,
+            contactEmail: data.email,
+            userName: user.full_name,
+          },
+        }),
+      });
+    }
   };
-
-  const { data, error } = await supabase
-    .from("contacts")
-    .insert([insertData])
-    .select()
-    .single();
-
-  if (error) {
-    toast.error("Lỗi khi thêm liên hệ: " + error.message);
-    return;
-  }
-
-  toast.success("Đã thêm liên hệ thành công");
-  setIsAddDialogOpen(false);
-  setNewContact({
-    name: "",
-    email: "",
-    phone: "",
-    zalo: "",
-    company: "",
-    company_size: "",
-    industry: "",
-    data_source: "",
-    life_stage: "lead",
-    assigned_to: user?.id || "",
-    position: "",
-    address: "",
-    next_appointment_at: undefined,
-    tags: [],
-    notes: "",
-  });
-  fetchContacts();
-
-  if (data && user?.id) {
-    await fetch("/api/activity/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: user.id,
-        action_type: "contact_added",
-        target_id: data.id,
-        target_type: "contact",
-        detail: {
-          contactName: data.name,
-          contactEmail: data.email,
-          userName: user.full_name,
-        },
-      }),
-    });
-  }
-};
-
-const handleSaveAppointmentDate = async () => {
-  if (!selectedContact || !appointmentDate) return;
-
-  const utcISOString = new Date(appointmentDate).toISOString();
-  const duration_min = Number(appointmentDuration) || 30;
-  const newStart = new Date(utcISOString);
-  const newEnd = new Date(newStart.getTime() + duration_min * 60 * 1000);
-
-  const { data: appointments, error: fetchError } = await supabase
-    .from("appointments")
-    .select("id, scheduled_at, duration_min")
-    .eq("created_by", user?.id);
-
-  if (fetchError) {
-    toast.error("Lỗi kiểm tra trùng lịch: " + fetchError.message);
-    return;
-  }
-
-  const isConflict = appointments.some((apt) => {
-    const existStart = new Date(apt.scheduled_at);
-    const existDuration = Number(apt.duration_min) || 30;
-    const existEnd = new Date(existStart.getTime() + existDuration * 60 * 1000);
-    return newStart < existEnd && existStart < newEnd;
-  });
-
-  if (isConflict) {
-    toast.error("Bạn đã có lịch hẹn khác bị trùng trong khoảng thời gian này!");
-    return;
-  }
-
-  const { error } = await supabase
-    .from("contacts")
-    .update({ next_appointment_at: utcISOString })
-    .eq("id", selectedContact.id);
-
-  if (!error) {
-    setSelectedContact({
-      ...selectedContact,
-      next_appointment_at: utcISOString,
-    });
-    setShowDateEdit(false);
-
-    const { error: insertError } = await supabase.from("appointments").insert([
-      {
-        contact_id: selectedContact.id,
-        title: `Lịch hẹn với ${selectedContact.name}`,
-        type: "meeting",
-        scheduled_at: utcISOString,
-        status: "scheduled",
-        created_by: user?.id,
-        duration_min,
-        note: appointmentNote, // Thêm ghi chú vào đây
-      },
-    ]);
-
-    if (insertError) {
-      toast.error("Lỗi khi thêm vào appointments: " + insertError.message);
-    } else {
-      toast.success("Đã lưu và thêm lịch hẹn vào Calendar!");
-    }
-  } else {
-    toast.error("Lỗi khi lưu lịch hẹn: " + error.message);
-  }
-};
 
   const handleViewContact = (contact: Contact) => {
     setSelectedContact(contact);
@@ -548,94 +419,92 @@ const handleSaveAppointmentDate = async () => {
     setIsEditDialogOpen(true);
   };
 
-  // Thay đổi tại dòng 580-631, trong hàm handleUpdateContact
-const handleUpdateContact = async () => {
-  if (!selectedContact) return;
+  const handleUpdateContact = async () => {
+    if (!selectedContact) return;
 
-  const { email, phone, assigned_to, life_stage } = newContact;
-  const orQuery = [];
-  if (email) orQuery.push(`email.eq.${email}`);
-  if (phone) orQuery.push(`phone.eq.${phone}`);
-  if (orQuery.length > 0) {
-    const { data: dupContacts, error } = await supabase
-      .from("contacts")
-      .select("id, name, email, phone")
-      .or(orQuery.join(","));
-    if (error) {
-      toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
-      return;
+    const { email, phone, assigned_to, life_stage } = newContact;
+    const orQuery = [];
+    if (email) orQuery.push(`email.eq.${email}`);
+    if (phone) orQuery.push(`phone.eq.${phone}`);
+    if (orQuery.length > 0) {
+      const { data: dupContacts, error } = await supabase
+        .from("contacts")
+        .select("id, name, email, phone")
+        .or(orQuery.join(","));
+      if (error) {
+        toast.error("Lỗi kiểm tra trùng lặp: " + error.message);
+        return;
+      }
+      const filteredDup = (dupContacts || []).filter((c) => c.id !== selectedContact.id);
+      if (filteredDup.length > 0) {
+        let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
+          email && phone ? " hoặc" : ""
+        }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
+        toast.error(msg);
+        return;
+      }
     }
-    const filteredDup = (dupContacts || []).filter((c) => c.id !== selectedContact.id);
-    if (filteredDup.length > 0) {
-      let msg = `Liên hệ với ${email ? `email "${email}"` : ""}${
-        email && phone ? " hoặc" : ""
-      }${phone ? ` số điện thoại "${phone}"` : ""} đã tồn tại!`;
-      toast.error(msg);
-      return;
-    }
-  }
 
-  const oldData = { ...selectedContact };
-  const updateData = {
-    ...newContact,
-    tags: newContact.tags,
-    assigned_to: assigned_to === "unassigned" ? null : assigned_to,
-    // Loại bỏ last_updated_by khỏi đây, để API xử lý
-  };
-  const { error } = await supabase
-    .from("contacts")
-    .update(updateData)
-    .eq("id", selectedContact.id);
-
-  if (error) {
-    toast.error("Lỗi cập nhật liên hệ: " + error.message);
-    return;
-  }
-
-  toast.success("Cập nhật liên hệ thành công");
-  setIsEditDialogOpen(false);
-  setSelectedContact({ ...selectedContact, ...updateData });
-  fetchContacts();
-
-  if (user?.id) {
-    const changedFields = Object.keys(newContact).filter(
-      (k) => newContact[k] !== oldData[k]
-    );
-    const detail: any = {
-      contactName: oldData.name,
-      fieldsChanged: changedFields,
-      userName: user.full_name,
-      changedAt: new Date().toISOString(),
+    const oldData = { ...selectedContact };
+    const { latestAppointment, ...updateData } = {
+      ...newContact,
+      tags: newContact.tags,
+      assigned_to: assigned_to === "unassigned" ? null : assigned_to,
     };
+    const { error } = await supabase
+      .from("contacts")
+      .update(updateData)
+      .eq("id", selectedContact.id);
 
-    if (oldData.assigned_to !== newContact.assigned_to) {
-      const oldUser =
-        oldData.assigned_to
-          ? profileOptions.find((p) => p.id === oldData.assigned_to)?.full_name || "Unassigned"
-          : "Unassigned";
-      const newUser =
-        newContact.assigned_to
-          ? profileOptions.find((p) => p.id === newContact.assigned_to)?.full_name || "Unassigned"
-          : "Unassigned";
-      detail.assignedFrom = oldUser;
-      detail.assignedTo = newUser;
+    if (error) {
+      toast.error("Lỗi cập nhật liên hệ: " + error.message);
+      return;
     }
 
-    await fetch("/api/activity/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: user.id,
-        action_type: oldData.assigned_to !== newContact.assigned_to
-          ? "assigned_changed"
-          : "contact_updated",
-        target_id: selectedContact.id,
-        target_type: "contact",
-        detail,
-      }),
-    });
-  }
-};
+    toast.success("Cập nhật liên hệ thành công");
+    setIsEditDialogOpen(false);
+    setSelectedContact({ ...selectedContact, ...updateData });
+    fetchContacts();
+
+    if (user?.id) {
+      const changedFields = Object.keys(newContact).filter(
+        (k) => newContact[k] !== oldData[k]
+      );
+      const detail: any = {
+        contactName: oldData.name,
+        fieldsChanged: changedFields,
+        userName: user.full_name,
+        changedAt: new Date().toISOString(),
+      };
+
+      if (oldData.assigned_to !== newContact.assigned_to) {
+        const oldUser =
+          oldData.assigned_to
+            ? profileOptions.find((p) => p.id === oldData.assigned_to)?.full_name || "Unassigned"
+            : "Unassigned";
+        const newUser =
+          newContact.assigned_to
+            ? profileOptions.find((p) => p.id === newContact.assigned_to)?.full_name || "Unassigned"
+            : "Unassigned";
+        detail.assignedFrom = oldUser;
+        detail.assignedTo = newUser;
+      }
+
+      await fetch("/api/activity/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          action_type: oldData.assigned_to !== newContact.assigned_to
+            ? "assigned_changed"
+            : "contact_updated",
+          target_id: selectedContact.id,
+          target_type: "contact",
+          detail,
+        }),
+      });
+    }
+  };
 
   const openDeleteDialog = async (contact: Contact) => {
     const { count } = await supabase
@@ -692,171 +561,98 @@ const handleUpdateContact = async () => {
     }
   };
 
-
-const handleAddActivity = async () => {
-  if (!selectedContact || !user?.id) {
-    toast.error("Không xác định được user hoặc contact!");
-    return;
-  }
-
-  const actionTime = new Date(`${newActivity.date}T${newActivity.time}:00Z`).toISOString();
-  const currentTime = new Date().toISOString();
-
-  const insertData: any = {
-    contact_id: selectedContact.id,
-    user_id: user.id,
-    type: newActivity.type,
-    note: newActivity.note,
-    action_time: actionTime,
-    attachment_url: null,
-  };
-
-  if ((newActivity.type === "call" || newActivity.type === "meeting") && newActivity.duration) {
-    insertData.duration_min = Number(newActivity.duration);
-  }
-
-  if (newActivity.location) {
-    insertData.location = newActivity.location;
-  }
-
-  if (newActivity.type === "task" && newActivity.dueDate) {
-    insertData.due_date = newActivity.dueDate;
-  }
-
-  // Thêm vào contact_history
-  const { error: historyError } = await supabase.from("contact_history").insert([insertData]);
-  if (historyError) {
-    toast.error("Lỗi thêm hoạt động: " + historyError.message);
-    return;
-  }
-
-  // Nếu là sự kiện tương lai, thêm vào appointments
-  if (actionTime >= currentTime) {
-    const { error: aptError } = await supabase.from("appointments").insert({
-      contact_id: selectedContact.id,
-      title: `${newActivity.type} với ${selectedContact.name}`,
-      type: newActivity.type,
-      scheduled_at: actionTime,
-      duration_min: insertData.duration_min || 30,
-      status: "scheduled",
-      note: newActivity.note,
-      created_by: user.id,
-      attendees: [user.id],
-      location: newActivity.location || "",
-    });
-
-    if (aptError) {
-      toast.error("Lỗi khi đồng bộ với Calendar: " + aptError.message);
-    } else {
-      toast.success("Đã thêm hoạt động và đồng bộ với Calendar!");
+  const handleAddActivity = async () => {
+    if (!selectedContact || !user?.id) {
+      toast.error("Không xác định được user hoặc contact!");
+      return;
     }
-  } else {
-    toast.success("Đã thêm hoạt động thành công!");
-  }
 
-  // Reset form và cập nhật danh sách
-  setIsAddActivityDialogOpen(false);
-  setNewActivity({
-    type: "call",
-    note: "",
-    date: new Date().toISOString().split("T")[0],
-    time: new Date().toTimeString().slice(0, 5),
-    duration: "",
-    location: "",
-    dueDate: "",
-    file: null,
-  });
-  fetchContactActivities(selectedContact.id);
+    const localDateTime = new Date(`${newActivity.action_time}:00Z`);
+    const utcDateTime = new Date(localDateTime.getTime() - 7 * 60 * 60000).toISOString();
 
-  // Log activity
-  await fetch("/api/activity/log", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    const currentTime = new Date().toISOString();
+
+    const insertData: any = {
+      contact_id: selectedContact.id,
       user_id: user.id,
-      action_type: "contact_activity_added",
-      target_id: selectedContact.id,
-      target_type: "contact",
-      detail: {
-        contactName: selectedContact.name,
-        activityType: newActivity.type,
+      type: newActivity.type,
+      note: newActivity.note,
+      action_time: utcDateTime,
+    };
+
+    if ((newActivity.type === "call" || newActivity.type === "meeting") && newActivity.duration) {
+      insertData.duration_min = Number(newActivity.duration);
+    }
+
+    if (newActivity.location) {
+      insertData.location = newActivity.location;
+    }
+
+    if (newActivity.type === "task" && newActivity.dueDate) {
+      const dueDateUTC = new Date(new Date(`${newActivity.dueDate}:00Z`).getTime() - 7 * 60 * 60000).toISOString();
+      insertData.due_date = dueDateUTC;
+    }
+
+    const { error: historyError } = await supabase.from("contact_history").insert([insertData]);
+    if (historyError) {
+      toast.error("Lỗi thêm hoạt động: " + historyError.message);
+      return;
+    }
+
+    if (utcDateTime >= currentTime) {
+      const { error: aptError } = await supabase.from("appointments").insert({
+        contact_id: selectedContact.id,
+        title: `${newActivity.type} với ${selectedContact.name}`,
+        type: newActivity.type,
+        scheduled_at: utcDateTime,
+        duration_min: insertData.duration_min || 30,
+        status: "scheduled",
         note: newActivity.note,
-        action_time: actionTime,
-        duration: insertData.duration_min,
-        location: insertData.location,
-        userName: user.full_name,
-      },
-    }),
-  });
-};
+        created_by: user.id,
+        attendees: [user.id],
+        location: newActivity.location || "",
+      });
 
-  // const handleAddActivity = async () => {
-  //   if (!selectedContact || !user?.id) {
-  //     toast.error("Không xác định được user hoặc contact!");
-  //     return;
-  //   }
+      if (aptError) {
+        toast.error("Lỗi khi đồng bộ với Calendar: " + aptError.message);
+      } else {
+        toast.success("Đã thêm hoạt động và đồng bộ với Calendar!");
+      }
+    } else {
+      toast.success("Đã thêm hoạt động thành công!");
+    }
 
-  //   const insertData: any = {
-  //     contact_id: selectedContact.id,
-  //     user_id: user.id,
-  //     type: newActivity.type,
-  //     note: newActivity.note,
-  //     action_time: new Date(`${newActivity.date}T${newActivity.time}`),
-  //     attachment_url: null,
-  //   };
+    setIsAddActivityDialogOpen(false);
+    setNewActivity({
+      type: "call",
+      note: "",
+      action_time: toZonedTime(new Date(), "Asia/Ho_Chi_Minh").toISOString().slice(0, 16),
+      duration: "",
+      location: "",
+      dueDate: "",
+    });
+    fetchContactActivities(selectedContact.id);
 
-  //   if ((newActivity.type === "call" || newActivity.type === "meeting") && newActivity.duration) {
-  //     insertData.duration_min = Number(newActivity.duration);
-  //   }
-
-  //   if (newActivity.location) {
-  //     insertData.location = newActivity.location;
-  //   }
-
-  //   if (newActivity.type === "task" && newActivity.dueDate) {
-  //     insertData.due_date = newActivity.dueDate;
-  //   }
-
-  //   const { error } = await supabase.from("contact_history").insert([insertData]);
-  //   if (error) {
-  //     toast.error("Lỗi thêm hoạt động: " + error.message);
-  //     return;
-  //   }
-
-  //   toast.success("Đã thêm hoạt động");
-  //   setIsAddActivityDialogOpen(false);
-  //   setNewActivity({
-  //     type: "call",
-  //     note: "",
-  //     date: new Date().toISOString().split("T")[0],
-  //     time: new Date().toTimeString().slice(0, 5),
-  //     duration: "",
-  //     location: "",
-  //     dueDate: "",
-  //     file: null,
-  //   });
-  //   fetchContactActivities(selectedContact.id);
-
-  //   await fetch("/api/activity/log", {
-  //     method: "POST",
-  //     headers: { "Content-Type": "application/json" },
-  //     body: JSON.stringify({
-  //       user_id: user.id,
-  //       action_type: "contact_activity_added",
-  //       target_id: selectedContact.id,
-  //       target_type: "contact",
-  //       detail: {
-  //         contactName: selectedContact.name,
-  //         activityType: newActivity.type,
-  //         note: newActivity.note,
-  //         action_time: insertData.action_time,
-  //         duration: insertData.duration_min,
-  //         location: insertData.location,
-  //         userName: user.full_name,
-  //       },
-  //     }),
-  //   });
-  // };
+    await fetch("/api/activity/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: user.id,
+        action_type: "contact_activity_added",
+        target_id: selectedContact.id,
+        target_type: "contact",
+        detail: {
+          contactName: selectedContact.name,
+          activityType: newActivity.type,
+          note: newActivity.note,
+          action_time: utcDateTime,
+          duration: insertData.duration_min,
+          location: insertData.location,
+          userName: user.full_name,
+        },
+      }),
+    });
+  };
 
   const handleDeleteActivity = async (activityId: string) => {
     const { error } = await supabase.from("contact_history").delete().eq("id", activityId);
@@ -902,28 +698,27 @@ const handleAddActivity = async () => {
     fetchContacts();
   };
 
-  const filteredContacts = contacts
-    .filter((contact) => {
-      if (user?.role === "admin") return true;
-      if (user?.role === "manager") {
-        return (
-          contact.assigned_to === user.id ||
-          (myManagedSales.length > 0 && myManagedSales.includes(contact.assigned_to))
-        );
-      }
-      if (user?.role === "sales") return contact.assigned_to === user.id;
-      return false;
-    })
-    .filter((contact) => {
-      const matchesSearch =
-        contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (contact.email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (contact.company || "").toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesLifeStage = lifeStageFilter === "all" || contact.life_stage === lifeStageFilter;
-      return matchesSearch && matchesLifeStage;
-    });
+  const filteredContacts = contacts.filter((contact) => {
+    if (user?.role === "admin") return true;
+    if (user?.role === "manager") {
+      return (
+        contact.assigned_to === user.id ||
+        (myManagedSales.length > 0 && myManagedSales.includes(contact.assigned_to))
+      );
+    }
+    if (user?.role === "sales") return contact.assigned_to === user.id;
+    return false;
+  }).filter((contact) => {
+    const matchesSearch =
+      contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (contact.email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (contact.company || "").toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesLifeStage = lifeStageFilter === "all" || contact.life_stage === lifeStageFilter;
+    return matchesSearch && matchesLifeStage;
+  });
 
-  // Render Contact Form
+  const totalPages = Math.ceil(totalContactsCount / ITEMS_PER_PAGE);
+
   const renderContactForm = (isEdit: boolean) => (
     <div className="grid gap-4 overflow-y-auto max-h-[calc(90vh-200px)]">
       <div className="grid grid-cols-2 gap-4">
@@ -1054,13 +849,10 @@ const handleAddActivity = async () => {
       </div>
       <div className="space-y-2">
         <Label htmlFor="assigned_to">Assigned To / Phụ trách</Label>
-
-
-
         <Select
           value={newContact.assigned_to || "unassigned"}
           onValueChange={async (value) => {
-            const originalContact = { ...newContact }; // Lưu bản sao trước khi cập nhật
+            const originalContact = { ...newContact };
             const newAssigned = value === "unassigned" ? null : value;
             setNewContact({ ...newContact, assigned_to: newAssigned });
             if (isEdit && newContact.id) {
@@ -1084,7 +876,7 @@ const handleAddActivity = async () => {
                       target_id: newContact.id,
                       target_type: "contact",
                       detail: {
-                        contactName: originalContact.name || "Unknown", // Sử dụng name từ bản gốc
+                        contactName: originalContact.name || "Unknown",
                         from: oldUser,
                         to: newUser,
                         userName: user.full_name,
@@ -1115,17 +907,12 @@ const handleAddActivity = async () => {
               })
               .map((profile) => (
                 <SelectItem key={profile.id} value={profile.id}>
-                  {profile.full_name} 
-                  {profile.role === "admin" ? "(Admin)" : 
-                   profile.role === "manager" ? "(Manager)" : 
-                   profile.role === "sales" ? "(Sales)" : ""}
+                  {profile.full_name}
+                  {profile.role === "admin" ? "(Admin)" : profile.role === "manager" ? "(Manager)" : "(Sales)"}
                 </SelectItem>
               ))}
           </SelectContent>
         </Select>
-
-
-
       </div>
       <div className="space-y-2">
         <Label>Tags / Nhãn</Label>
@@ -1187,7 +974,6 @@ const handleAddActivity = async () => {
 
   return (
     <div className="space-y-6">
-      {/* Header & Add Dialog */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Contacts</h1>
@@ -1211,7 +997,6 @@ const handleAddActivity = async () => {
                 assigned_to: user?.id || "",
                 position: "",
                 address: "",
-                next_appointment_at: undefined,
                 tags: [],
                 notes: "",
               });
@@ -1239,7 +1024,6 @@ const handleAddActivity = async () => {
         </Dialog>
       </div>
 
-      {/* Search & Filter */}
       <div className="flex items-center gap-4">
         <Input
           placeholder="Tìm kiếm theo tên, email hoặc công ty..."
@@ -1262,7 +1046,6 @@ const handleAddActivity = async () => {
         </Select>
       </div>
 
-      {/* Contact List */}
       <Card className="hover:shadow-lg">
         <CardHeader>
           <CardTitle>Danh sách liên hệ của bạn</CardTitle>
@@ -1275,151 +1058,179 @@ const handleAddActivity = async () => {
             {filteredContacts.length === 0 && (
               <div className="text-center text-gray-400">Không tìm thấy liên hệ phù hợp.</div>
             )}
-            
-{filteredContacts.map((contact) => (
-  <div
-    key={contact.id}
-    className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
-  >
-    <div className="flex items-center space-x-4">
-      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-        <User className="h-5 w-5 text-blue-600" />
-      </div>
-      <div>
-        <h3 className="font-medium">{contact.name}</h3>
-        <div className="flex items-center gap-4 text-sm text-gray-500">
-          <span className="flex items-center gap-1">
-            <Mail className="h-3 w-3" />
-            {contact.email}
-          </span>
-          <span className="flex items-center gap-1">
-            <Phone className="h-3 w-3" />
-            {contact.phone}
-          </span>
-          <span className="flex items-center gap-1">
-            <Building className="h-3 w-3" />
-            {contact.company}
-          </span>
-        </div>
-      </div>
-    </div>
-    <div className="flex items-center gap-2">
-      <Badge className={getLifeStageColor(contact.life_stage)}>
-        {LIFE_STAGE_OPTIONS.find((l) => l.value === contact.life_stage)?.label ||
-          contact.life_stage}
-      </Badge>
-      <Badge
-        className={
-          contact.assigned_to
-            ? "bg-green-100 text-green-800"
-            : "bg-gray-200 text-gray-600"
-        }
-      >
-        <UserCheck className="mr-1 h-3 w-3" />
-        {contact.assigned_to
-          ? profileOptions.find((p) => p.id === contact.assigned_to)?.full_name ||
-            "Đang gán..."
-          : "Not Assigned"}
-      </Badge>
-      <div className="flex gap-1">
-        <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
-          <Eye className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => handleEditContact(contact)}>
-          <Edit className="h-4 w-4" />
-        </Button>
-        {user?.role === "admin" && (
-          <AlertDialog
-            open={deleteDialog.open}
-            onOpenChange={(open) => setDeleteDialog({ ...deleteDialog, open })}
-          >
-            <AlertDialogTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => openDeleteDialog(contact)}
-                title="Xóa liên hệ"
+            {filteredContacts.map((contact) => (
+              <div
+                key={contact.id}
+                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
               >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  <span className="flex items-center gap-2 text-red-600">
-                    <Trash2 className="h-5 w-5" />
-                    Xóa liên hệ
-                  </span>
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {deleteDialog.historyCount > 0 ? (
-                    <>
-                      Liên hệ này còn <b>{deleteDialog.historyCount}</b> lịch sử liên hệ. Để xóa
-                      liên hệ, bạn phải xóa tất cả lịch sử liên hệ này trước.
-                      <br />
-                      <b>Bạn có muốn xóa toàn bộ lịch sử liên hệ và xóa liên hệ này không?</b>
-                    </>
-                  ) : (
-                    <>
-                      Are you sure you want to delete this contact? This action cannot be undone.
-                      <br />
-                      Bạn có chắc chắn muốn xóa liên hệ này? Hành động này không thể hoàn tác.
-                    </>
+                <div className="flex items-center space-x-4">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <User className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium">{contact.name}</h3>
+                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Mail className="h-3 w-3" />
+                        {contact.email}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Phone className="h-3 w-3" />
+                        {contact.phone}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Building className="h-3 w-3" />
+                        {contact.company}
+                      </span>
+                    </div>
+                    {contact.latestAppointment && (
+                      <div className="flex items-center gap-1 text-sm text-gray-500 mt-1">
+                        <Calendar className="h-3 w-3" />
+                        Lịch hẹn gần nhất: {formatTimestamp(contact.latestAppointment)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge className={getLifeStageColor(contact.life_stage)}>
+                    {LIFE_STAGE_OPTIONS.find((l) => l.value === contact.life_stage)?.label ||
+                      contact.life_stage}
+                  </Badge>
+                  {(user?.role === "manager" || user?.role === "admin") && (
+                    <Badge
+                      className={
+                        contact.assigned_to
+                          ? "bg-green-100 text-green-800"
+                          : "bg-gray-200 text-gray-600"
+                      }
+                    >
+                      <UserCheck className="mr-1 h-3 w-3" />
+                      {contact.assigned_to
+                        ? profileOptions.find((p) => p.id === contact.assigned_to)?.full_name ||
+                          "Đang gán..."
+                        : "Not Assigned"}
+                    </Badge>
                   )}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel
-                  onClick={() => setDeleteDialog({ ...deleteDialog, open: false })}
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => handleViewContact(contact)}>
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleEditContact(contact)}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    {user?.role === "admin" && (
+                      <AlertDialog
+                        open={deleteDialog.open}
+                        onOpenChange={(open) => setDeleteDialog({ ...deleteDialog, open })}
+                      >
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openDeleteDialog(contact)}
+                            title="Xóa liên hệ"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              <span className="flex items-center gap-2 text-red-600">
+                                <Trash2 className="h-5 w-5" />
+                                Xóa liên hệ
+                              </span>
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {deleteDialog.historyCount > 0 ? (
+                                <>
+                                  Liên hệ này còn <b>{deleteDialog.historyCount}</b> lịch sử liên hệ. Để xóa
+                                  liên hệ, bạn phải xóa tất cả lịch sử liên hệ này trước.
+                                  <br />
+                                  <b>Bạn có muốn xóa toàn bộ lịch sử liên hệ và xóa liên hệ này không?</b>
+                                </>
+                              ) : (
+                                <>
+                                  Are you sure you want to delete this contact? This action cannot be undone.
+                                  <br />
+                                  Bạn có chắc chắn muốn xóa liên hệ này? Hành động này không thể hoàn tác.
+                                </>
+                              )}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel
+                              onClick={() => setDeleteDialog({ ...deleteDialog, open: false })}
+                            >
+                              Cancel / Hủy
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              disabled={deleteDialog.loading}
+                              onClick={async () => {
+                                setDeleteDialog((d) => ({ ...d, loading: true }));
+                                if (deleteDialog.historyCount > 0) {
+                                  await supabase
+                                    .from("contact_history")
+                                    .delete()
+                                    .eq("contact_id", deleteDialog.contact!.id);
+                                }
+                                await proceedDeleteContact(deleteDialog.contact!);
+                                setDeleteDialog({
+                                  open: false,
+                                  contact: null,
+                                  loading: false,
+                                  historyCount: 0,
+                                });
+                              }}
+                            >
+                              {deleteDialog.historyCount > 0
+                                ? "Xóa hết lịch sử và liên hệ"
+                                : "Delete / Xóa"}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {totalPages > 1 && (
+              <div className="flex justify-center gap-2">
+                <Button
+                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
                 >
-                  Cancel / Hủy
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  disabled={deleteDialog.loading}
-                  onClick={async () => {
-                    setDeleteDialog((d) => ({ ...d, loading: true }));
-                    if (deleteDialog.historyCount > 0) {
-                      await supabase
-                        .from("contact_history")
-                        .delete()
-                        .eq("contact_id", deleteDialog.contact!.id);
-                    }
-                    await proceedDeleteContact(deleteDialog.contact!);
-                    setDeleteDialog({
-                      open: false,
-                      contact: null,
-                      loading: false,
-                      historyCount: 0,
-                    });
-                  }}
+                  Previous
+                </Button>
+                {Array.from({ length: totalPages }, (_, i) => (
+                  <Button
+                    key={i + 1}
+                    onClick={() => setCurrentPage(i + 1)}
+                    variant={currentPage === i + 1 ? "default" : "outline"}
+                  >
+                    {i + 1}
+                  </Button>
+                ))}
+                <Button
+                  onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages || totalPages === 0}
                 >
-                  {deleteDialog.historyCount > 0
-                    ? "Xóa hết lịch sử và liên hệ"
-                    : "Delete / Xóa"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-      </div>
-    </div>
-  </div>
-))}
-
+                  Next
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      {/* View Contact Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
+        <DialogContent className="max-w-4xl max-h-[100vh] overflow-hidden">
           <DialogHeader className="items-center text-center">
-            <DialogTitle className="flex items-center gap-2">Chi tiết liên hệ</DialogTitle>
-            <DialogDescription>Xem và quản lý thông tin liên hệ và lịch sử hoạt động</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">CHI TIẾT LIÊN HỆ</DialogTitle>
           </DialogHeader>
           {selectedContact && (
             <div className="space-y-6 overflow-y-auto max-h-[calc(90vh-200px)]">
-              {/* Basic Info */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-lg font-semibold text-blue-600">
                   <Info className="h-5 w-5" />
@@ -1463,13 +1274,21 @@ const handleAddActivity = async () => {
                     </Label>
                     <Badge variant="outline">{selectedContact.data_source}</Badge>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 lg:col-span-3">
                     <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
                       <Building className="h-4 w-4 text-blue-400" />Công ty
                     </Label>
                     <p>{selectedContact.company}</p>
                   </div>
-                  <div className="space-y-2">
+                
+                  <div className="space-y-2 lg:col-span-3">
+                    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-blue-400" />Địa chỉ
+                    </Label>
+                    <p>{selectedContact.address || <span className="italic text-gray-400">-</span>}</p>
+                  </div>
+
+                    <div className="space-y-2">
                     <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
                       <Users className="h-4 w-4 text-blue-400" />Quy mô công ty
                     </Label>
@@ -1483,12 +1302,6 @@ const handleAddActivity = async () => {
                   </div>
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-blue-400" />Địa chỉ
-                    </Label>
-                    <p>{selectedContact.address || <span className="italic text-gray-400">-</span>}</p>
-                  </div>
-                  <div className="space-y-2 lg:col-span-2">
-                    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
                       <Tag className="h-4 w-4 text-blue-400" />Tags
                     </Label>
                     <div>
@@ -1499,161 +1312,125 @@ const handleAddActivity = async () => {
                       ))}
                     </div>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 w-max">
                     <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-blue-400" />Lịch hẹn sắp tới
-                      <button
-                        className="ml-1 text-blue-600 hover:underline text-xs"
-                        title="Cập nhật lịch hẹn"
-                        onClick={async () => {
-                          let iso = "";
-                          if (selectedContact?.next_appointment_at) {
-                            iso = toDatetimeLocal(selectedContact.next_appointment_at);
-                          }
-                          const duration = await fetchNextAppointmentDuration(
-                            selectedContact?.id,
-                            selectedContact?.next_appointment_at,
-                          );
-                          setAppointmentDate(iso);
-                          setAppointmentDuration(duration);
-                          setShowDateEdit(true);
-                        }}
-                      >
-                        <Edit className="h-3 w-3" />
-                      </button>
+                      <Flag className="h-4 w-4 text-blue-400" />Life Stage
                     </Label>
-                    <div className="flex items-center gap-2">
-                      <span>
-                        {selectedContact.next_appointment_at
-                          ? formatTimestamp(selectedContact.next_appointment_at)
-                          : <span className="italic text-gray-400">-</span>}
-                      </span>
-                    </div>
+                    <Select
+                      value={selectedContact.life_stage}
+                      onValueChange={async (value) => {
+                        const oldLifeStage = selectedContact.life_stage;
+                        const response = await fetch("/api/activity/log", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            user_id: user?.id,
+                            action_type: "life_stage_changed",
+                            target_id: selectedContact.id,
+                            target_type: "contact",
+                            detail: {
+                              contactName: selectedContact.name,
+                              from: oldLifeStage,
+                              to: value,
+                              userName: user?.full_name,
+                            },
+                          }),
+                        });
+                        const result = await response.json();
+                        if (response.ok) {
+                          toast.success("Cập nhật Life Stage thành công!");
+                          fetchContacts();
+                          setSelectedContact({ ...selectedContact, life_stage: value });
+                        } else {
+                          toast.error("Lỗi cập nhật Life Stage: " + (result.error || "Unknown error"));
+                        }
+                      }}
+                    >
+                      <SelectTrigger className={getLifeStageColor(selectedContact.life_stage)}>
+                        <SelectValue>
+                          {LIFE_STAGE_OPTIONS.find((l) => l.value === selectedContact.life_stage)?.label}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LIFE_STAGE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  
-<div className="space-y-2 w-max">
-  <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
-    <Flag className="h-4 w-4 text-blue-400" />Life Stage
-  </Label>
-  <Select
-    value={selectedContact.life_stage}
-    onValueChange={async (value) => {
-      const oldLifeStage = selectedContact.life_stage;
-      const response = await fetch("/api/activity/log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user?.id,
-          action_type: "life_stage_changed",
-          target_id: selectedContact.id,
-          target_type: "contact",
-          detail: {
-            contactName: selectedContact.name,
-            from: oldLifeStage,
-            to: value,
-            userName: user?.full_name,
-          },
-        }),
-      });
-      const result = await response.json();
-      if (response.ok) {
-        toast.success("Cập nhật Life Stage thành công!");
-        fetchContacts();
-        setSelectedContact({ ...selectedContact, life_stage: value });
-      } else {
-        toast.error("Lỗi cập nhật Life Stage: " + (result.error || "Unknown error"));
-      }
-    }}
-  >
-    <SelectTrigger className={getLifeStageColor(selectedContact.life_stage)}>
-      <SelectValue>
-        {LIFE_STAGE_OPTIONS.find((l) => l.value === selectedContact.life_stage)?.label}
-      </SelectValue>
-    </SelectTrigger>
-    <SelectContent>
-      {LIFE_STAGE_OPTIONS.map((opt) => (
-        <SelectItem key={opt.value} value={opt.value}>
-          {opt.label}
-        </SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
-</div>
-                 
                   <div className="space-y-2 w-max">
                     <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
                       <UserCheck className="h-4 w-4 text-blue-400" />Người phụ trách
                     </Label>
                     <Select
-    value={selectedContact.assigned_to || "unassigned"}
-    onValueChange={async (value) => {
-      const oldAssigned = selectedContact.assigned_to;
-      const newAssigned = value === "unassigned" ? null : value;
-      const { error } = await supabase
-        .from("contacts")
-        .update({ assigned_to: newAssigned })
-        .eq("id", selectedContact.id);
-      if (error) {
-        toast.error("Cập nhật người phụ trách thất bại: " + error.message);
-      } else {
-        toast.success("Đã cập nhật người phụ trách thành công");
-        setSelectedContact({ ...selectedContact, assigned_to: newAssigned });
-        fetchContacts();
-        if (user?.id) {
-          const oldUser = profileOptions.find((p) => p.id === oldAssigned)?.full_name || "Unassigned";
-          const newUser = profileOptions.find((p) => p.id === newAssigned)?.full_name || "Unassigned";
-          await fetch("/api/activity/log", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              user_id: user.id,
-              action_type: "assigned_changed",
-              target_id: selectedContact.id,
-              target_type: "contact",
-              detail: {
-                contactName: selectedContact.name,
-                from: oldUser,
-                to: newUser,
-                userName: user.full_name,
-                changedAt: new Date().toISOString(),
-              },
-            }),
-          });
-        }
-      }
-    }}
-  >
-    <SelectTrigger className="w-[220px]">
-      <SelectValue placeholder="Chọn người phụ trách..." />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
-      {profileOptions
-        .filter((profile) => {
-          if (user?.role === "admin") return true; // Admin thấy tất cả
-          if (user?.role === "manager") {
-            return profile.id === user.id || (profile.manager_id === user.id && profile.role === "sales");
-          }
-          if (user?.role === "sales") {
-            return profile.id === user.id || (profile.role === "sales" && profile.manager_id === user.manager_id);
-          }
-          return false;
-        })
-        .map((profile) => (
-          <SelectItem key={profile.id} value={profile.id}>
-            {profile.full_name} 
-            {profile.role === "admin" ? "(Admin)" : 
-             profile.role === "manager" ? "(Manager)" : 
-             profile.role === "sales" ? "(Sales)" : ""}
-          </SelectItem>
-        ))}
-    </SelectContent>
-  </Select>
+                      value={selectedContact.assigned_to || "unassigned"}
+                      onValueChange={async (value) => {
+                        const oldAssigned = selectedContact.assigned_to;
+                        const newAssigned = value === "unassigned" ? null : value;
+                        const { error } = await supabase
+                          .from("contacts")
+                          .update({ assigned_to: newAssigned })
+                          .eq("id", selectedContact.id);
+                        if (error) {
+                          toast.error("Cập nhật người phụ trách thất bại: " + error.message);
+                        } else {
+                          toast.success("Đã cập nhật người phụ trách thành công");
+                          setSelectedContact({ ...selectedContact, assigned_to: newAssigned });
+                          fetchContacts();
+                          if (user?.id) {
+                            const oldUser = profileOptions.find((p) => p.id === oldAssigned)?.full_name || "Unassigned";
+                            const newUser = profileOptions.find((p) => p.id === newAssigned)?.full_name || "Unassigned";
+                            await fetch("/api/activity/log", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                user_id: user.id,
+                                action_type: "assigned_changed",
+                                target_id: selectedContact.id,
+                                target_type: "contact",
+                                detail: {
+                                  contactName: selectedContact.name,
+                                  from: oldUser,
+                                  to: newUser,
+                                  userName: user.full_name,
+                                  changedAt: new Date().toISOString(),
+                                },
+                              }),
+                            });
+                          }
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-[220px]">
+                        <SelectValue placeholder="Chọn người phụ trách..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">-- Chưa phân bổ --</SelectItem>
+                        {profileOptions
+                          .filter((profile) => {
+                            if (user?.role === "admin") return true;
+                            if (user?.role === "manager") {
+                              return profile.id === user.id || (profile.manager_id === user.id && profile.role === "sales");
+                            }
+                            if (user?.role === "sales") {
+                              return profile.id === user.id || (profile.role === "sales" && profile.manager_id === user.manager_id);
+                            }
+                            return false;
+                          })
+                          .map((profile) => (
+                            <SelectItem key={profile.id} value={profile.id}>
+                              {profile.full_name}
+                              {profile.role === "admin" ? "(Admin)" : profile.role === "manager" ? "(Manager)" : "(Sales)"}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>
 
-              {/* Activity History */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-lg font-semibold text-green-600">
@@ -1669,9 +1446,11 @@ const handleAddActivity = async () => {
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
                       <DialogHeader>
-                        <DialogTitle>Thêm hoạt động mới với khách</DialogTitle>
+                        <DialogTitle>
+                          Thêm hoạt động mới với khách: {selectedContact?.name || "Loading..."}
+                        </DialogTitle>
                         <DialogDescription>
-                          Ghi lại tương tác mới với liên hệ này
+                          Ghi lại hoặc lên kế hoạch một hoạt động mới cho liên hệ này
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4">
@@ -1695,63 +1474,51 @@ const handleAddActivity = async () => {
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="activity-date">Ngày</Label>
+                            <Label htmlFor="activity-time">
+                              Thời gian <span className="text-sm text-gray-500">(Nhập theo giờ Việt Nam - GMT+7)</span>
+                            </Label>
                             <Input
-                              id="activity-date"
-                              type="date"
-                              value={newActivity.date}
-                              onChange={(e) => setNewActivity({ ...newActivity, date: e.target.value })}
+                              id="activity-time"
+                              type="datetime-local"
+                              value={newActivity.action_time ? newActivity.action_time.split(".")[0] : ""}
+                              onChange={(e) => setNewActivity({ ...newActivity, action_time: e.target.value })}
                             />
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label htmlFor="activity-time">Giờ</Label>
+                            <Label htmlFor="activity-duration">Thời lượng (phút)</Label>
                             <Input
-                              id="activity-time"
-                              type="time"
-                              value={newActivity.time}
-                              onChange={(e) => setNewActivity({ ...newActivity, time: e.target.value })}
+                              id="activity-duration"
+                              type="number"
+                              value={newActivity.duration}
+                              onChange={(e) => setNewActivity({ ...newActivity, duration: e.target.value })}
+                              placeholder="30"
+                              disabled={newActivity.type !== "call" && newActivity.type !== "meeting"}
                             />
                           </div>
-                          {(newActivity.type === "call" || newActivity.type === "meeting") && (
+                          {(newActivity.type === "meeting" || newActivity.type === "call") && (
                             <div className="space-y-2">
-                              <Label htmlFor="duration">Thời lượng (phút)</Label>
+                              <Label htmlFor="location">Địa điểm</Label>
                               <Input
-                                id="duration"
-                                type="number"
-                                value={newActivity.duration}
-                                onChange={(e) =>
-                                  setNewActivity({ ...newActivity, duration: e.target.value })
-                                }
-                                placeholder="30"
+                                id="location"
+                                value={newActivity.location}
+                                onChange={(e) => setNewActivity({ ...newActivity, location: e.target.value })}
+                                placeholder="Office, Zoom, Phone..."
                               />
                             </div>
                           )}
                         </div>
-                        {(newActivity.type === "meeting" || newActivity.type === "call") && (
-                          <div className="space-y-2">
-                            <Label htmlFor="location">Địa điểm</Label>
-                            <Input
-                              id="location"
-                              value={newActivity.location}
-                              onChange={(e) =>
-                                setNewActivity({ ...newActivity, location: e.target.value })
-                              }
-                              placeholder="Office, Zoom, Phone..."
-                            />
-                          </div>
-                        )}
                         {newActivity.type === "task" && (
                           <div className="space-y-2">
-                            <Label htmlFor="due-date">Hạn hoàn thành</Label>
+                            <Label htmlFor="due-date">
+                              Hạn hoàn thành <span className="text-sm text-gray-500">(Nhập theo giờ Việt Nam - GMT+7)</span>
+                            </Label>
                             <Input
                               id="due-date"
-                              type="date"
-                              value={newActivity.dueDate}
-                              onChange={(e) =>
-                                setNewActivity({ ...newActivity, dueDate: e.target.value })
-                              }
+                              type="datetime-local"
+                              value={newActivity.dueDate ? newActivity.dueDate.split(".")[0] : ""}
+                              onChange={(e) => setNewActivity({ ...newActivity, dueDate: e.target.value })}
                             />
                           </div>
                         )}
@@ -1765,41 +1532,12 @@ const handleAddActivity = async () => {
                             rows={3}
                           />
                         </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="file-upload">Đính kèm tệp (Optional)</Label>
-                          <div className="flex items-center gap-2">
-                            <Input
-                              id="file-upload"
-                              type="file"
-                              onChange={handleFileUpload}
-                              className="flex-1"
-                            />
-                            {newActivity.file && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setNewActivity({ ...newActivity, file: null })}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                          {newActivity.file && (
-                            <p className="text-sm text-gray-600">Selected: {newActivity.file.name}</p>
-                          )}
-                        </div>
                       </div>
                       <DialogFooter>
-                        <Button
-                          variant="outline"
-                          onClick={() => setIsAddActivityDialogOpen(false)}
-                        >
+                        <Button variant="outline" onClick={() => setIsAddActivityDialogOpen(false)}>
                           Cancel / Hủy
                         </Button>
-                        <Button
-                          onClick={handleAddActivity}
-                          disabled={!newActivity.note.trim()}
-                        >
+                        <Button onClick={handleAddActivity} disabled={!newActivity.note.trim()}>
                           Add Activity / Thêm hoạt động
                         </Button>
                       </DialogFooter>
@@ -1807,90 +1545,89 @@ const handleAddActivity = async () => {
                   </Dialog>
                 </div>
                 <Separator />
-                <ScrollArea className="h-64 w-full">
-                  {activityLoading ? (
-                    <div className="text-center py-8 text-gray-400">
-                      Đang tải lịch sử hoạt động...
-                    </div>
-                  ) : activities.length > 0 ? (
-                    <div className="space-y-3">
-                      {activities.map((activity) => {
-                        const typeInfo = getActivityTypeInfo(activity.type);
-                        return (
-                          <div
-                            key={activity.id}
-                            className="flex gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 transition"
-                          >
-                            <div className="text-2xl">{typeInfo.emoji}</div>
-                            <div className="flex-1 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-sm">
-                                    {typeInfo.label.split(" / ")[0]}
-                                  </span>
-                                  {activity.user_id && (
-                                    <span className="text-xs text-gray-400">
-                                      User: {activity.user_id}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-gray-500">
-                                    {formatTimestamp(activity.action_time)}
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleDeleteActivity(activity.id)}
-                                    className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
-                                    title="Xoá hoạt động này"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </div>
-                              <p className="text-sm text-gray-700 whitespace-pre-line">
-                                {activity.note}
-                              </p>
-                              {activity.duration_min && (
-                                <p className="text-xs text-gray-500">
-                                  Thời lượng: {activity.duration_min} phút
-                                </p>
-                              )}
-                              {activity.location && (
-                                <p className="text-xs text-gray-500">Địa điểm: {activity.location}</p>
-                              )}
-                              {activity.due_date && (
-                                <p className="text-xs text-gray-500">Hạn: {activity.due_date}</p>
-                              )}
-                              {activity.attachment_url && (
-                                <a
-                                  href={activity.attachment_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs text-blue-600 underline"
-                                >
-                                  📎 Đính kèm
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <Clock className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                      <p>No activity history yet / Chưa có lịch sử hoạt động</p>
-                      <p className="text-sm">
-                        Add your first interaction above / Thêm tương tác đầu tiên ở trên
-                      </p>
-                    </div>
+<ScrollArea className="h-64 w-full">
+  {activityLoading ? (
+    <div className="text-center py-8 text-gray-400">
+      Đang tải lịch sử hoạt động...
+    </div>
+  ) : activities.length > 0 ? (
+    <div className="space-y-3">
+      {activities.map((activity) => {
+        const typeInfo = getActivityTypeInfo(activity.type);
+        return (
+          <div
+            key={activity.id}
+            className="flex gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 transition"
+          >
+            <div className="text-2xl">{typeInfo.emoji}</div>
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-sm">
+                    {typeInfo.label.split(" / ")[0]}
+                  </span>
+                  {activity.profiles?.full_name && (
+                    <span className="text-xs text-gray-400">
+                      User: {activity.profiles.full_name}
+                    </span>
                   )}
-                </ScrollArea>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">
+                    {formatTimestamp(activity.action_time)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeleteActivity(activity.id)}
+                    className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                    title="Xoá hoạt động này"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <p className="text-sm text-gray-700 whitespace-pre-line">
+                {activity.note}
+              </p>
+              {activity.duration_min && (
+                <p className="text-xs text-gray-500">
+                  Thời lượng: {activity.duration_min} phút
+                </p>
+              )}
+              {activity.location && (
+                <p className="text-xs text-gray-500">Địa điểm: {activity.location}</p>
+              )}
+              {activity.due_date && (
+                <p className="text-xs text-gray-500">Hạn: {activity.due_date}</p>
+              )}
+              {activity.attachment_url && (
+                <a
+                  href={activity.attachment_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 underline"
+                >
+                  📎 Đính kèm
+                </a>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : (
+    <div className="text-center py-8 text-gray-500">
+      <Clock className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+      <p>No activity history yet / Chưa có lịch sử hoạt động</p>
+      <p className="text-sm">
+        Add your first interaction above / Thêm tương tác đầu tiên ở trên
+      </p>
+    </div>
+  )}
+</ScrollArea>
               </div>
 
-              {/* Notes Section */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-lg font-semibold text-purple-600">
@@ -1970,50 +1707,6 @@ const handleAddActivity = async () => {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Appointment Dialog */}
-<Dialog open={showDateEdit} onOpenChange={setShowDateEdit}>
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Cập nhật lịch hẹn sắp tới</DialogTitle>
-    </DialogHeader>
-    <div className="space-y-4">
-      <Label htmlFor="edit-appointment">Chọn ngày & giờ hẹn mới</Label>
-      <Input
-        id="edit-appointment"
-        type="datetime-local"
-        value={appointmentDate}
-        onChange={(e) => setAppointmentDate(e.target.value)}
-      />
-      <Label htmlFor="edit-appointment-duration">Thời lượng (phút)</Label>
-      <Input
-        id="edit-appointment-duration"
-        type="number"
-        min={1}
-        max={480}
-        value={appointmentDuration}
-        onChange={(e) => setAppointmentDuration(Number(e.target.value))}
-      />
-      <Label htmlFor="edit-appointment-note">Ghi chú</Label>
-      <Textarea
-        id="edit-appointment-note"
-        value={appointmentNote}
-        onChange={(e) => setAppointmentNote(e.target.value)}
-        placeholder="Nhập ghi chú cho lịch hẹn..."
-        rows={3}
-      />
-    </div>
-    <DialogFooter>
-      <Button variant="outline" onClick={() => setShowDateEdit(false)}>
-        Hủy
-      </Button>
-      <Button onClick={handleSaveAppointmentDate} disabled={!appointmentDate}>
-        Lưu
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
-
-      {/* Edit Contact Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader className="items-center text-center">
