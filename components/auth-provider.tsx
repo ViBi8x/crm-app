@@ -1,7 +1,8 @@
 "use client";
+
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient"; // Đảm bảo là singleton
 
 interface AuthContextType {
   user: any;
@@ -24,11 +25,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const getUserSession = async () => {
       setIsLoading(true);
-      // getSession sẽ lấy lại được session sau reload
       const { data: { session }, error } = await supabase.auth.getSession();
 
-      if (session?.user) {
-        // Lấy profile
+      if (!ignore && session?.user) {
         const { data: profileData } = await supabase
           .from("profiles")
           .select("*")
@@ -39,12 +38,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsAuthenticated(true);
           setIsLoading(false);
         }
-      } else {
-        if (!ignore) {
-          setUser(null);
-          setIsAuthenticated(false);
-          setIsLoading(false);
-        }
+      } else if (!ignore) {
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsLoading(false);
       }
     };
 
@@ -52,18 +49,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Listen login/logout
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
+      if (!ignore && session?.user) {
         supabase
           .from("profiles")
           .select("*")
           .eq("id", session.user.id)
           .single()
           .then(({ data: profileData }) => {
-            setUser({ ...session.user, ...profileData });
-            setIsAuthenticated(true);
-            setIsLoading(false);
+            if (!ignore) {
+              setUser({ ...session.user, ...profileData });
+              setIsAuthenticated(true);
+              setIsLoading(false);
+            }
           });
-      } else {
+      } else if (!ignore) {
         setUser(null);
         setIsAuthenticated(false);
         setIsLoading(false);
