@@ -1,14 +1,11 @@
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import axios from "axios";
-
-// Khởi tạo Firebase Admin
-admin.initializeApp();
-
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineString } from "firebase-functions/params";
 
-// Định nghĩa biến môi trường
+admin.initializeApp();
+
 const supabaseUrl = defineString("SUPABASE_URL", { default: "https://igxvutyhdsmanhomamzo.supabase.co/rest/v1/appointments" });
 const supabaseKey = defineString("SUPABASE_SERVICE_ROLE_KEY", { default: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." });
 
@@ -16,9 +13,6 @@ export const scheduleReminder = onSchedule(
   { schedule: "every 1 minutes", region: "us-central1" },
   async (event) => {
     try {
-      const now = new Date().toISOString();
-      const fifteenMinsLater = new Date(new Date().getTime() + 15 * 60 * 1000).toISOString();
-
       const response = await axios.get(supabaseUrl.value(), {
         headers: {
           apikey: supabaseKey.value(),
@@ -27,7 +21,6 @@ export const scheduleReminder = onSchedule(
         params: {
           select: "id,title,scheduled_at,created_by",
           status: "eq.scheduled",
-          scheduled_at: `gte.${now},lte.${fifteenMinsLater}`,
         },
       });
 
@@ -51,15 +44,15 @@ export const scheduleReminder = onSchedule(
             await admin.messaging().send({
               token: user.fcm_token,
               notification: {
-                title: "Nhắc nhở sự kiện",
-                body: `${appointment.title} sẽ diễn ra trong 15 phút.`,
+                title: "Test Nhắc nhở sự kiện",
+                body: `${appointment.title} - Gửi ngay để test!`,
               },
             });
-            logger.info(`Đã gửi thông báo cho ${appointment.created_by}`);
+            logger.info(`Đã gửi thông báo test cho ${appointment.created_by}`);
           }
         }
       } else {
-        logger.info("Không có sự kiện nào trong 15 phút tới");
+        logger.info("Không có sự kiện nào để gửi test");
       }
     } catch (error) {
       logger.error("Lỗi trong scheduleReminder:", error);
