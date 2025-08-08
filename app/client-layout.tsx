@@ -1,70 +1,74 @@
 "use client";
 
-import type { ReactNode } from 'react';
-import { useEffect } from 'react';
-import { SidebarProvider } from '@/components/ui/sidebar';
-import { AppSidebar } from '@/components/app-sidebar';
-import { Header } from '@/components/header';
-import { Toaster } from 'sonner';
-import { usePathname } from 'next/navigation';
-import { useAuth } from '@/components/auth-provider';
-import { messaging, app } from '@/lib/firebase';
-import { supabase } from '@/lib/supabaseClient'; // Import singleton
+import type { ReactNode } from "react";
+import { useEffect, useRef } from "react";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
+import { Header } from "@/components/header";
+import { Toaster } from "sonner";
+import { usePathname } from "next/navigation";
+import { useAuth } from "@/components/auth-provider";
+import { app } from "@/lib/firebase";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function ClientRootLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const isLoginPage = pathname === '/login';
+  const isLoginPage = pathname === "/login";
   const { user } = useAuth();
+  const didInit = useRef(false);
 
   useEffect(() => {
-    let isMounted = true;
+    if (didInit.current) return;
+    didInit.current = true;
 
-    const requestPermission = async () => {
-      if (!('serviceWorker' in navigator)) return;
+    if (!user || isLoginPage) return;
 
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted' && !isLoginPage && user && isMounted) {
-        try {
-          const registration = await navigator.serviceWorker.ready;
-          const vapidKey = 'BOTbg6krvPOcKxu3RnhYAB8p_5eDOmepdmbJtb1uus69SbogwEWOm_SkuehuywaSOpU_0Aete3YZ8p7EmCijF7Q';
-          console.log('Messaging object:', messaging);
-          const token = await messaging.getToken({ vapidKey });
-          if (token && isMounted) {
-            console.log('FCM Token:', token);
-            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-            const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-            if (!supabaseUrl || !supabaseKey) {
-              console.error('Missing Supabase environment variables:', { supabaseUrl, supabaseKey });
-              return;
-            }
-            // Sử dụng instance supabase đã được khởi tạo
-            const { error } = await supabase
-              .from('profiles')
-              .update({ fcm_token: token })
-              .eq('id', user.id);
-            if (error && isMounted) console.error('Lỗi lưu token:', error);
-            else if (isMounted) console.log('Token đã được lưu vào Supabase');
-          } else if (isMounted) {
-            console.log('Không lấy được token');
-          }
-        } catch (error) {
-          if (isMounted) console.error('Lỗi khi lấy token:', error);
-        }
-      } else if (isMounted) {
-        console.log('Quyền thông báo bị từ chối, đang ở trang login, hoặc user không tồn tại');
+    (async () => {
+      if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+
+      // 1) Đăng ký SW và CHỜ sẵn sàng
+      const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+
+      // 2) Xin quyền
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        console.warn("User không cấp quyền thông báo:", perm);
+        return;
       }
-    };
 
-    requestPermission();
+      // 3) Import động firebase/messaging
+      const { getMessaging, getToken, onMessage, isSupported } = await import("firebase/messaging");
+      if (!(await isSupported())) {
+        console.warn("FCM không được hỗ trợ trên trình duyệt này.");
+        return;
+      }
 
-    return () => {
-      isMounted = false;
-    };
+      const messaging = getMessaging(app);
+      const vapidKey = "BOTbg6krvPOcKxu3RnhYAB8p_5eDOmepdmbJtb1uus69SbogwEWOm_SkuehuywaSOpU_0Aete3YZ8p7EmCijF7Q";
+
+      // 4) LẤY TOKEN — bắt buộc truyền serviceWorkerRegistration
+      const token = await getToken(messaging, {
+        vapidKey,
+        serviceWorkerRegistration: registration,
+      });
+
+      if (token) {
+        console.log("FCM Token:", token);
+        const { error } = await supabase.from("profiles").update({ fcm_token: token }).eq("id", user.id);
+        if (error) console.error("Lỗi lưu fcm_token:", error);
+      } else {
+        console.warn("Không lấy được FCM token.");
+      }
+
+      // 5) Foreground test
+      onMessage(messaging, (payload) => {
+        console.log("Foreground message:", payload);
+      });
+    })().catch((e) => console.error("Lỗi khi thiết lập FCM:", e));
   }, [isLoginPage, user?.id]);
 
-  if (isLoginPage) {
-    return <>{children}</>;
-  }
+  if (isLoginPage) return <>{children}</>;
 
   return (
     <SidebarProvider>

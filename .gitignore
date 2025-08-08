@@ -25,3 +25,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# firebase service account keys (mọi tên, mọi folder, json/js)
+*serviceAccountKey*.json
+*serviceAccountKey*.js
+serviceAccount*.json
+serviceAccount*.js
+*.pem
+*.p12
