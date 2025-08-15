@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "noti:dev": "nodemon noti-script/index.js"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -47,6 +48,7 @@
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "dayjs": "^1.11.13",
+    "dotenv": "^17.2.1",
     "embla-carousel-react": "8.5.1",
     "firebase": "^10.12.0",
     "firebase-admin": "^13.4.0",
@@ -54,6 +56,7 @@
     "lucide-react": "^0.454.0",
     "next": "15.2.4",
     "next-themes": "^0.4.4",
+    "node-cron": "^4.2.1",
     "papaparse": "^5.5.3",
     "react": "^18.3.1",
     "react-day-picker": "latest",
@@ -74,6 +77,8 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^7.0.3",
+    "nodemon": "^3.1.10",
     "postcss": "^8.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^5"
